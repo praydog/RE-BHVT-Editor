@@ -22,6 +22,7 @@ local LEFT_ARROW = imgui.get_key_index(1)
 local RIGHT_ARROW = imgui.get_key_index(2)
 local UP_ARROW = imgui.get_key_index(3)
 local DOWN_ARROW = imgui.get_key_index(4)
+local VK_LSHIFT = 0xA0
 
 local cfg = {
     always_show_node_editor = false,
@@ -31,12 +32,14 @@ local cfg = {
     parent_display_depth = 0,
     default_node = 0,
     default_node_search_name = "",
-    view = {
-        show_side_panels = true
-    },
-    editor = {
-        pan_speed = 10
-    }
+
+    -- view
+    show_side_panels = true,
+
+    -- editor
+    pan_speed = 1000,
+    lerp_speed = 2.0,
+    lerp_nodes = true,
 }
 
 local cfg_path = "bhvteditor/main_config.json"
@@ -1452,6 +1455,8 @@ local draw_node_children = nil
 local draw_node = nil
 
 local active_tree = nil
+local last_time = 0.0
+local delta_time = 0.0
 
 -- Draw children and compute space requirements
 draw_node_children = function(i, node, seen, active)
@@ -1479,7 +1484,24 @@ draw_node_children = function(i, node, seen, active)
         }
 
         if not unlock_node_positioning then
-            imnodes.set_node_grid_space_pos(child.id, child_render_pos.x, child_render_pos.y)
+            if cfg.lerp_nodes then
+                local current_child_pos = imnodes.get_node_grid_space_pos(child.id)
+
+                local crp = Vector2f.new(child_render_pos.x, child_render_pos.y)
+                local dist = (current_child_pos - crp):length()
+
+                if dist < 10 then
+                    crp = current_child_pos + ((crp - current_child_pos) * delta_time * cfg.lerp_speed)
+                elseif dist < 50 then
+                    crp = current_child_pos + ((crp - current_child_pos) * delta_time * 5.0 * cfg.lerp_speed)
+                else
+                    crp = current_child_pos + ((crp - current_child_pos) * delta_time * 10.0 * cfg.lerp_speed)
+                end
+
+                imnodes.set_node_grid_space_pos(child.id, crp.x, crp.y)
+            else
+                imnodes.set_node_grid_space_pos(child.id, child_render_pos.x, child_render_pos.y)
+            end
         end
 
         local link_id = imgui.get_id(node_descriptor.name .. custom_tree[child_id].name .. "LINK")
@@ -1505,6 +1527,10 @@ draw_node_children = function(i, node, seen, active)
     -- if the node has no children, meaning it's the end of the chain
     if #node_descriptor.children == 0 then
         out_dim_requirements.y = out_dim_requirements.y + node_dims.y + 5
+    else
+        if node_dims.y > out_dim_requirements.y then
+            out_dim_requirements.y = node_dims.y + 5
+        end
     end
 
     return out_dim_requirements, active
@@ -1571,55 +1597,36 @@ local queued_editor_id_move_step2 = nil
 local queued_editor_id_start_time = os.clock()
 local SIDEBAR_BASE_WIDTH = 500
 
-local last_time = 0.0
 local panning_decay = Vector2f.new(0, 0)
 
 local function perform_panning()
     local panning = imnodes.editor_get_panning()
     local new_panning = panning:clone()
-    local delta_time = os.clock() - last_time
 
     if imgui.is_key_down(LEFT_ARROW) then
-        new_panning.x = panning.x + cfg.editor.pan_speed * delta_time
+        new_panning.x = panning.x + cfg.pan_speed * delta_time
     end
 
     if imgui.is_key_down(RIGHT_ARROW) then
-        new_panning.x = panning.x - cfg.editor.pan_speed * delta_time
+        new_panning.x = panning.x - cfg.pan_speed * delta_time
     end
 
     if imgui.is_key_down(UP_ARROW) then
-        new_panning.y = panning.y + cfg.editor.pan_speed  * delta_time
+        new_panning.y = panning.y + cfg.pan_speed  * delta_time
     end
 
     if imgui.is_key_down(DOWN_ARROW) then
-        new_panning.y = panning.y - cfg.editor.pan_speed * delta_time
-    end
-
-    if (new_panning - panning):length() > 0 then
-        --imnodes.editor_reset_panning(new_panning.x, new_panning.y)
+        new_panning.y = panning.y - cfg.pan_speed * delta_time
     end
 
     local panning_delta = new_panning - panning
 
-    if panning_delta.x ~= 0.0 then
-        panning_decay.x = panning_delta.x
-    end
-
-    if panning_delta.y ~= 0.0 then
-        panning_decay.y = panning_delta.y
-    end
+    panning_decay = panning_decay + ((panning_delta - panning_decay) * (delta_time))
 
     if panning_decay:length() > 0 then
         panning = imnodes.editor_get_panning()
-
-        panning_decay = panning_decay * 0.9999999 * math.min(delta_time * 25.0, 0.9)
-
-        local new_panning = {
-            x = panning.x + panning_decay.x,
-            y = panning.y + panning_decay.y
-        }
-
-        imnodes.editor_reset_panning(new_panning.x, new_panning.y)
+        panning_decay = panning_decay * 0.999999 * (1.0 - delta_time)
+        imnodes.editor_reset_panning(panning.x + panning_decay.x, panning.y + panning_decay.y)
     end
 end
 
@@ -1642,7 +1649,7 @@ local function draw_stupid_editor(name)
         end
 
         if imgui.begin_menu("View") then
-            changed, cfg.view.show_side_panels = imgui.checkbox("Show side panel", cfg.view.show_side_panels)
+            changed, cfg.show_side_panels = imgui.checkbox("Show side panel", cfg.show_side_panels)
             changed, unlock_node_positioning = imgui.checkbox("Unlock Node Positioning", unlock_node_positioning)
             changed, cfg.show_minimap = imgui.checkbox("Show Minimap", cfg.show_minimap)
     
@@ -1650,7 +1657,6 @@ local function draw_stupid_editor(name)
             changed, cfg.display_parent_of_active = imgui.checkbox("Display Parent of Active", cfg.display_parent_of_active)
             changed, cfg.parent_display_depth = imgui.slider_int("Parent Display Depth", cfg.parent_display_depth, 0, 10)
 
-            --imgui.open_popup("MenuBar_view")
             imgui.end_menu()
         end
 
@@ -1670,7 +1676,18 @@ local function draw_stupid_editor(name)
         end
 
         if imgui.begin_menu("Editor") then
-            changed, cfg.editor.pan_speed = imgui.slider_float("Pan Speed", cfg.editor.pan_speed, 100.0, 5000.0)
+            if imgui.begin_menu("Lerp Settings") then
+                changed, cfg.lerp_nodes = imgui.checkbox("Lerp Nodes", cfg.lerp_nodes)
+                changed, cfg.lerp_speed = imgui.slider_float("Lerp Speed", cfg.lerp_speed, 0, 5.0)
+
+                imgui.end_menu()
+            end
+
+            if imgui.begin_menu("Pan Settings") then
+                changed, cfg.pan_speed = imgui.slider_float("Pan Speed", cfg.pan_speed, 100.0, 5000.0)
+                
+                imgui.end_menu()
+            end
 
             imgui.end_menu()
         end
@@ -1740,7 +1757,7 @@ local function draw_stupid_editor(name)
         cache_tree(layer, tree)
     end
 
-    if cfg.view.show_side_panels then
+    if cfg.show_side_panels then
         local ws = imgui.get_window_size()
 
         local made_child = false
@@ -1788,6 +1805,7 @@ local function draw_stupid_editor(name)
     end
 
     imnodes.begin_node_editor()
+    perform_panning()
 
     local move_to_node = function(id)
         imnodes.editor_move_to_node(id)
@@ -1917,8 +1935,6 @@ local function draw_stupid_editor(name)
         imnodes.minimap(0.5, 0)
     end
 
-    perform_panning()
-
     imnodes.end_node_editor()
 
     node_is_hovered, node_hovered_id = imnodes.is_node_hovered()
@@ -1935,6 +1951,8 @@ local EDITOR_SIZE = {
 }
 
 re.on_frame(function()
+    delta_time = os.clock() - last_time
+
     local disp_size = imgui.get_display_size()
     imgui.set_next_window_size({EDITOR_SIZE.x, EDITOR_SIZE.y}, 1 << 1) -- ImGuiCond_Once
     imgui.set_next_window_pos({disp_size.x / 2 - (EDITOR_SIZE.x / 2), disp_size.y / 2 - (EDITOR_SIZE.y / 2)}, 1 << 1)
