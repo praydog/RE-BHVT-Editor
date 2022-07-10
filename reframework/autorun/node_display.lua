@@ -18,6 +18,11 @@ local node_replacements = {
 
 }
 
+local LEFT_ARROW = imgui.get_key_index(1)
+local RIGHT_ARROW = imgui.get_key_index(2)
+local UP_ARROW = imgui.get_key_index(3)
+local DOWN_ARROW = imgui.get_key_index(4)
+
 local cfg = {
     always_show_node_editor = false,
     show_minimap = true,
@@ -28,6 +33,9 @@ local cfg = {
     default_node_search_name = "",
     view = {
         show_side_panels = true
+    },
+    editor = {
+        pan_speed = 10
     }
 }
 
@@ -647,7 +655,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             imgui.tree_pop()
         end
 
-        if imgui.tree_node("Unloaded Actions [" .. tostring(#node:get_unloaded_actions()) .. "]") then
+        --[[if imgui.tree_node("Unloaded Actions [" .. tostring(#node:get_unloaded_actions()) .. "]") then
             local actions = node:get_unloaded_actions()
 
             for i=1, #actions do
@@ -659,7 +667,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             end
 
             imgui.tree_pop()
-        end
+        end]]
 
         --------------------------------------------------
         ----------- NODE TRANSITION STATES ---------------
@@ -1560,7 +1568,60 @@ end
 local last_editor_size = Vector2f.new(0, 0)
 local was_hovering_sidebar = false
 local queued_editor_id_move_step2 = nil
+local queued_editor_id_start_time = os.clock()
 local SIDEBAR_BASE_WIDTH = 500
+
+local last_time = 0.0
+local panning_decay = Vector2f.new(0, 0)
+
+local function perform_panning()
+    local panning = imnodes.editor_get_panning()
+    local new_panning = panning:clone()
+    local delta_time = os.clock() - last_time
+
+    if imgui.is_key_down(LEFT_ARROW) then
+        new_panning.x = panning.x + cfg.editor.pan_speed * delta_time
+    end
+
+    if imgui.is_key_down(RIGHT_ARROW) then
+        new_panning.x = panning.x - cfg.editor.pan_speed * delta_time
+    end
+
+    if imgui.is_key_down(UP_ARROW) then
+        new_panning.y = panning.y + cfg.editor.pan_speed  * delta_time
+    end
+
+    if imgui.is_key_down(DOWN_ARROW) then
+        new_panning.y = panning.y - cfg.editor.pan_speed * delta_time
+    end
+
+    if (new_panning - panning):length() > 0 then
+        --imnodes.editor_reset_panning(new_panning.x, new_panning.y)
+    end
+
+    local panning_delta = new_panning - panning
+
+    if panning_delta.x ~= 0.0 then
+        panning_decay.x = panning_delta.x
+    end
+
+    if panning_delta.y ~= 0.0 then
+        panning_decay.y = panning_delta.y
+    end
+
+    if panning_decay:length() > 0 then
+        panning = imnodes.editor_get_panning()
+
+        panning_decay = panning_decay * 0.9999999 * math.min(delta_time * 25.0, 0.9)
+
+        local new_panning = {
+            x = panning.x + panning_decay.x,
+            y = panning.y + panning_decay.y
+        }
+
+        imnodes.editor_reset_panning(new_panning.x, new_panning.y)
+    end
+end
 
 local function draw_stupid_editor(name)
     if not reframework:is_drawing_ui() then return end
@@ -1571,27 +1632,16 @@ local function draw_stupid_editor(name)
     end]]
 
     local changed = false
+    local now = os.clock()
 
     if imgui.begin_menu_bar() then
-        if imgui.menu_item("File") then
-            imgui.open_popup("MenuBar_file")
-        end
-
-        if imgui.menu_item("View") then
-            imgui.open_popup("MenuBar_view")
-        end
-
-        if imgui.menu_item("About") then
-            imgui.open_popup("MenuBar_about")
-        end
-
-        if imgui.begin_popup("MenuBar_file") then
+        if imgui.begin_menu("File") then
             imgui.text("This literally does nothing.")
-            
-            imgui.end_popup()
+
+            imgui.end_menu()
         end
 
-        if imgui.begin_popup("MenuBar_view") then
+        if imgui.begin_menu("View") then
             changed, cfg.view.show_side_panels = imgui.checkbox("Show side panel", cfg.view.show_side_panels)
             changed, unlock_node_positioning = imgui.checkbox("Unlock Node Positioning", unlock_node_positioning)
             changed, cfg.show_minimap = imgui.checkbox("Show Minimap", cfg.show_minimap)
@@ -1600,17 +1650,41 @@ local function draw_stupid_editor(name)
             changed, cfg.display_parent_of_active = imgui.checkbox("Display Parent of Active", cfg.display_parent_of_active)
             changed, cfg.parent_display_depth = imgui.slider_int("Parent Display Depth", cfg.parent_display_depth, 0, 10)
 
-            imgui.end_popup()
+            --imgui.open_popup("MenuBar_view")
+            imgui.end_menu()
         end
 
-        if imgui.begin_popup("MenuBar_about") then
+        if imgui.begin_menu("Search") then
+            changed, cfg.default_node_search_name = imgui.input_text("Search Node by Name", cfg.default_node_search_name)
+
+            if changed then
+                for k, v in pairs(custom_tree) do
+                    if v.name == cfg.default_node_search_name then
+                        cfg.default_node = k
+                        break
+                    end
+                end
+            end
+
+            imgui.end_menu()
+        end
+
+        if imgui.begin_menu("Editor") then
+            changed, cfg.editor.pan_speed = imgui.slider_float("Pan Speed", cfg.editor.pan_speed, 100.0, 5000.0)
+
+            imgui.end_menu()
+        end
+
+        if imgui.begin_menu("About") then
             imgui.text("An editor/viewer for the RE Engine's behavior tree/finite state machine system.")
             imgui.text("Author: praydog")
             imgui.text("https://github.com/praydog/REFramework")
 
-            imgui.end_popup()
+            imgui.end_menu()
         end
-        
+
+
+        imgui.text(tostring(#imnodes.get_selected_nodes()) .. " selected nodes")
 
         imgui.end_menu_bar()
     end
@@ -1679,10 +1753,9 @@ local function draw_stupid_editor(name)
 
         if made_child then
             -- Search
-            if imgui.begin_child_window("Search", Vector2f.new(SIDEBAR_BASE_WIDTH, 100), true) then
+            --[[if imgui.begin_child_window("Search", Vector2f.new(SIDEBAR_BASE_WIDTH, 100), true) then
 
                 changed, cfg.default_node = imgui.slider_int("Node to Draw", cfg.default_node, 0, #custom_tree)
-                changed, cfg.default_node_search_name = imgui.input_text("Search Node", cfg.default_node_search_name)
     
                 if changed then
                     for k, v in pairs(custom_tree) do
@@ -1694,7 +1767,7 @@ local function draw_stupid_editor(name)
                 end
     
                 imgui.end_child_window()
-            end
+            end]]
 
             -- Tree overview
             if layer ~= nil and tree ~= nil then
@@ -1743,9 +1816,11 @@ local function draw_stupid_editor(name)
 
             if parent_i > 0 then
                 cfg.default_node = parent_i
+            else
+                cfg.default_node = i
             end
 
-            if cfg.default_node > 0 then
+            if parent_i > 0 then
                 for j=0, cfg.parent_display_depth-1 do
                     local parent_node = tree:get_node(cfg.default_node)
 
@@ -1786,6 +1861,7 @@ local function draw_stupid_editor(name)
 
                 set_base_node_to_parent(queued_editor_id_move.i)
                 queued_editor_id_move_step2 = queued_editor_id_move.id
+                queued_editor_id_start_time = os.clock()
                 cfg.follow_active_nodes = false
             end
 
@@ -1802,6 +1878,7 @@ local function draw_stupid_editor(name)
                     set_base_node_to_parent(i)
 
                     queued_editor_id_move_step2 = node:get_id()
+                    queued_editor_id_start_time = os.clock()
 
                     break
                 end
@@ -1830,12 +1907,17 @@ local function draw_stupid_editor(name)
 
     if queued_editor_id_move_step2 ~= nil then
         move_to_node(queued_editor_id_move_step2)
-        queued_editor_id_move_step2 = nil
+
+        if os.clock() - queued_editor_id_start_time > 1.0 then
+            queued_editor_id_move_step2 = nil
+        end
     end
 
     if cfg.show_minimap then
         imnodes.minimap(0.5, 0)
     end
+
+    perform_panning()
 
     imnodes.end_node_editor()
 
@@ -1857,4 +1939,6 @@ re.on_frame(function()
     imgui.set_next_window_size({EDITOR_SIZE.x, EDITOR_SIZE.y}, 1 << 1) -- ImGuiCond_Once
     imgui.set_next_window_pos({disp_size.x / 2 - (EDITOR_SIZE.x / 2), disp_size.y / 2 - (EDITOR_SIZE.y / 2)}, 1 << 1)
     draw_stupid_editor("Behavior Tree Editor v0.1337")
+
+    last_time = os.clock()
 end)
