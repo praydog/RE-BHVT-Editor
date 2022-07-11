@@ -1014,6 +1014,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
 
                         if evts:size() == 0 then
                             imgui.text("[ EMPTY ]")
+                            imgui.tree_pop()
                             return
                         end
 
