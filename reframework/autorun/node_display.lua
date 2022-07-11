@@ -165,6 +165,14 @@ local function duplicate_global_static_condition(tree, i)
     return duplicate_managed_object_in_array(tree:get_data():get_static_conditions(), i)
 end
 
+local function duplicate_global_static_transition_event(tree, i)
+    return duplicate_managed_object_in_array(tree:get_data():get_static_transitions(), i)
+end
+
+local function duplicate_global_transition_event(tree, i)
+    return duplicate_managed_object_in_array(tree:get_transitions(), i)
+end
+
 local function cache_node_indices(sorted_nodes, tree)
     if cached_node_indices[tree] ~= nil then
         return
@@ -1026,6 +1034,28 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                             end,
                             function(tree, j, node, element_tree)
                                 display_event(tree, i, j, node, tostring(evts[j]) .. ": " .. tostring(element_tree:get_type_definition():get_full_name()), element_tree) -- TODO, DO THAT ONE!
+                            end,
+                            function(i, element)
+                                if element == nil then
+                                    return
+                                end
+            
+                                local global_index = evts[j]
+            
+                                local duped_element = nil
+                                local duped_index = 0
+            
+                                if (global_index & (1 << 30)) ~= 0 then
+                                    duped_element = duplicate_global_static_transition_event(tree, global_index & 0xFFFFFFF)
+                                    duped_index = (tree:get_data():get_static_transitions():size() - 1) | (1 << 30)
+                                else
+                                    duped_element = duplicate_global_transition_event(tree, global_index)
+                                    duped_index = tree:get_transitions():size() - 1
+                                end
+            
+                                if duped_element ~= nil then
+                                    evts:push_back(duped_index)
+                                end
                             end
                         )
 
