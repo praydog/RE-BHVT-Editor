@@ -981,8 +981,18 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 end,
                 function(tree, i, node, element)
                     local evts = element
+                    local made = imgui.tree_node(tostring(i) .. " [" .. tostring(evts:size()) .. "]")
 
-                    if imgui.tree_node(tostring(i) .. " [" .. tostring(evts:size()) .. "]") then
+                    imgui.same_line()
+
+                    local state_index = node_data:get_states()[i]
+
+                    if state_index >= 0 and state_index < tree:get_node_count() then
+                        local state_name = get_node_full_name(tree:get_node(state_index))
+                        imgui.text_colored("[" .. state_name .. "]", 0xFF00FF00)
+                    end
+
+                    if made then
                         local selection = selection_map[tree][node:get_id()] 
 
                         changed, selection = imgui.combo("Add event", selection, event_name_map[tree])
