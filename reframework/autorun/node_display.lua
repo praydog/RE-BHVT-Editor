@@ -70,7 +70,6 @@ local cfg = {
     display_parent_of_active = true,
     parent_display_depth = 0,
     default_node = 0,
-    default_node_search_name = "",
     show_side_panels = true,
     graph_closes_with_reframework = true,
 
@@ -78,6 +77,12 @@ local cfg = {
     pan_speed = 1000,
     lerp_speed = 2.0,
     lerp_nodes = true,
+
+    -- search
+    max_search_results = 200,
+    default_node_search_name = "",
+    default_condition_search_name = "",
+    default_action_search_name = "",
 }
 
 local cfg_path = "bhvteditor/main_config.json"
@@ -1346,6 +1351,48 @@ local function display_tree(core, tree)
         imgui.tree_pop()
     end
 
+    made = imgui.tree_node("Transition Events")
+    imgui.same_line()
+    imgui.text(" [" .. tostring(tree:get_static_transition_count() + tree:get_transition_count()) .. "] ")
+
+    if made then
+        display_bhvt_array(tree, nil, tree:get_data():get_static_transitions(), 
+            function(tree, x) 
+                return x
+            end, 
+            function(tree, i, node, element)
+                if element ~= nil then
+                    display_event(tree, i, nil, nil, tostring(i | (1 << 30)) .. ": " .. element:get_type_definition():get_full_name(), element)
+                else
+                    imgui.text(tostring(i) .. ": [ null ]")
+                end
+            end,
+            function(i, element)
+                duplicate_global_static_transition_event(tree, i)
+            end
+        )
+        
+        imgui.separator()
+
+        display_bhvt_array(tree, nil, tree:get_transitions(),
+            function(tree, x) 
+                return x
+            end, 
+            function(tree, i, node, element)
+                if element ~= nil then
+                    display_event(tree, i, nil, nil, tostring(i) .. ": " .. element:get_type_definition():get_full_name(), element)
+                else
+                    imgui.text(tostring(i) .. ": [ null ]")
+                end
+            end,
+            function(i, element)
+                duplicate_global_transition_event(tree, i)
+            end
+        )
+
+        imgui.tree_pop()
+    end
+
     --[[if imgui.tree_node("All nodes") then
         for k, node in pairs(sorted_nodes) do
             imgui.push_id(node:get_id())
@@ -1947,7 +1994,9 @@ local function set_base_node_to_parent(tree, i)
     end
 end
 
-local last_search_results = {}
+local last_search_results_node = {}
+local last_search_results_condition = {}
+local last_search_results_action = {}
 
 local function draw_stupid_editor(name)
     if cfg.graph_closes_with_reframework then
@@ -2007,13 +2056,17 @@ local function draw_stupid_editor(name)
             imgui.text("Results will initially show as tooltips.")
             imgui.text("Press enter to interact with the results.")
 
+            changed, cfg.max_search_results = imgui.slider_int("Max Results", cfg.max_search_results, 1, 1000)
             changed, cfg.default_node_search_name = imgui.input_text("Node Search (Name, ID, or Index)", cfg.default_node_search_name)
+            local search_by_name_active = imgui.is_item_active()
 
             if changed then
-                last_search_results = {}
+                last_search_results_node = {}
+                last_search_results_action = {}
+                last_search_results_condition = {}
                 local already_set = false
 
-                for i, v in pairs(custom_tree) do
+                for i, v in ipairs(custom_tree) do
                     local name = v.name:lower()
                     local search_name = cfg.default_node_search_name:lower()
                     local id = tree:get_node(i):get_id()
@@ -2023,7 +2076,7 @@ local function draw_stupid_editor(name)
 
                         if node then
                             display_node(tree, node)
-                            table.insert(last_search_results, node)
+                            table.insert(last_search_results_node, node)
                         end
 
                         if not already_set then
@@ -2032,31 +2085,142 @@ local function draw_stupid_editor(name)
                         end
 
                         -- Limit the search results to 200 and break out early
-                        if #last_search_results > 200 then
+                        if #last_search_results_node > cfg.max_search_results then
                             break
                         end
                     end
                 end
             end
 
-            local search_by_name_active = imgui.is_item_active()
+            changed, cfg.default_condition_search_name = imgui.input_text("Condition Search (Name, Index)", cfg.default_condition_search_name)
+            search_by_name_active = search_by_name_active or imgui.is_item_active()
+
+            if changed then
+                last_search_results_node = {}
+                last_search_results_action = {}
+                last_search_results_condition = {}
+
+                for i=0, tree:get_static_condition_count()-1 do
+                    local real_index = i | (1 << 30)
+                    local condition = tree:get_condition(real_index)
+
+                    if condition then
+                        local name = condition:get_type_definition():get_full_name():lower()
+                        local search_name = cfg.default_condition_search_name:lower()
+
+                        if name:find(search_name) or search_name == tostring(i) then
+                            display_condition(tree, condition, nil)
+                            table.insert(last_search_results_condition, { ["i"] = real_index, cond = condition })
+
+                            -- Limit the search results to 200 and break out early
+                            if #last_search_results_condition > cfg.max_search_results then
+                                break
+                            end
+                        end
+                    end
+                end
+
+                for i=0, tree:get_condition_count()-1 do
+                    local condition = tree:get_condition(i)
+
+                    if condition then
+                        local name = condition:get_type_definition():get_full_name():lower()
+                        local search_name = cfg.default_condition_search_name:lower()
+
+                        if name:find(search_name) or search_name == tostring(i) then
+                            display_condition(tree, condition, nil)
+                            table.insert(last_search_results_condition, { ["i"] = i, cond = condition })
+
+                            -- Limit the search results to 200 and break out early
+                            if #last_search_results_condition > cfg.max_search_results then
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+
+            changed, cfg.default_action_search_name = imgui.input_text("Action Search (Name, Index)", cfg.default_action_search_name)
+            search_by_name_active = search_by_name_active or imgui.is_item_active()
+
+            if changed then
+                last_search_results_node = {}
+                last_search_results_action = {}
+                last_search_results_condition = {}
+
+                for i=0, tree:get_static_action_count() - 1 do
+                    local real_index = i | (1 << 30)
+                    local action = tree:get_action(real_index)
+
+                    if action then
+                        local name = action:get_type_definition():get_full_name():lower()
+                        local search_name = cfg.default_action_search_name:lower()
+
+                        if name:find(search_name) or search_name == tostring(i) then
+                            display_action(tree, nil, nil, action:get_type_definition():get_full_name(), action)
+                            table.insert(last_search_results_action, { ["i"] = real_index, act = action })
+
+                            -- Limit the search results to 200 and break out early
+                            if #last_search_results_action > cfg.max_search_results then
+                                break
+                            end
+                        end
+                    end
+                end
+
+                for i=0, tree:get_action_count()-1 do
+                    local action = tree:get_action(i)
+
+                    if action then
+                        local name = action:get_type_definition():get_full_name():lower()
+                        local search_name = cfg.default_action_search_name:lower()
+
+                        if name:find(search_name) or search_name == tostring(i) then
+                            display_action(tree, i, nil, action:get_type_definition():get_full_name(), action)
+                            table.insert(last_search_results_action, { ["i"] = i, act = action })
+
+                            -- Limit the search results to 200 and break out early
+                            if #last_search_results_action > cfg.max_search_results then
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+
 
             if imgui.is_key_pressed(ENTER) then
                 imgui.open_popup("Search_Results_Name")
             elseif not imgui.is_popup_open("Search_Results_Name") and search_by_name_active then
                 -- Display a tooltip instead of a popup.
                 imgui.begin_tooltip()
-                    for i, node in ipairs(last_search_results) do
+                    for i, node in ipairs(last_search_results_node) do
                         display_node(tree, node)
+                    end
+
+                    for i, cond in ipairs(last_search_results_condition) do
+                        display_condition(tree, nil, nil, tostring(cond.i) .. ": " .. cond.cond:get_type_definition():get_full_name(), cond)
+                    end
+
+                    for i, act in ipairs(last_search_results_action) do
+                        display_action(tree, act.i, nil, act.act:get_type_definition():get_full_name(), act.act)
                     end
                 imgui.end_tooltip()
             end
 
             if imgui.begin_popup("Search_Results_Name") then
-                for i, node in ipairs(last_search_results) do
+                for i, node in ipairs(last_search_results_node) do
                     display_node(tree, node)
                 end
     
+                for i, cond in ipairs(last_search_results_condition) do
+                    display_condition(tree, nil, nil, tostring(cond.i) .. ": " .. cond.cond:get_type_definition():get_full_name(), cond)
+                end
+
+                for i, act in ipairs(last_search_results_action) do
+                    display_action(tree, act.i, nil, act.act:get_type_definition():get_full_name(), act.act)
+                end
+
                 imgui.end_popup()
             end
 
