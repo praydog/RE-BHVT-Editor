@@ -59,6 +59,7 @@ local LEFT_ARROW = imgui.get_key_index(1)
 local RIGHT_ARROW = imgui.get_key_index(2)
 local UP_ARROW = imgui.get_key_index(3)
 local DOWN_ARROW = imgui.get_key_index(4)
+local ENTER = imgui.get_key_index(13)
 local VK_LSHIFT = 0xA0
 
 local cfg = {
@@ -1946,6 +1947,8 @@ local function set_base_node_to_parent(tree, i)
     end
 end
 
+local last_search_results = {}
+
 local function draw_stupid_editor(name)
     if cfg.graph_closes_with_reframework then
         if not reframework:is_drawing_ui() then return end
@@ -2001,15 +2004,60 @@ local function draw_stupid_editor(name)
         end
 
         if imgui.begin_menu("Search") then
-            changed, cfg.default_node_search_name = imgui.input_text("Search Node by Name", cfg.default_node_search_name)
+            imgui.text("Results will initially show as tooltips.")
+            imgui.text("Press enter to interact with the results.")
+
+            changed, cfg.default_node_search_name = imgui.input_text("Node Search (Name, ID, or Index)", cfg.default_node_search_name)
 
             if changed then
-                for k, v in pairs(custom_tree) do
-                    if v.name == cfg.default_node_search_name then
-                        cfg.default_node = k
-                        break
+                last_search_results = {}
+                local already_set = false
+
+                for i, v in pairs(custom_tree) do
+                    local name = v.name:lower()
+                    local search_name = cfg.default_node_search_name:lower()
+                    local id = tree:get_node(i):get_id()
+
+                    if name:find(search_name) or search_name == tostring(id) or search_name == tostring(i) then
+                        local node = tree:get_node(i)
+
+                        if node then
+                            display_node(tree, node)
+                            table.insert(last_search_results, node)
+                        end
+
+                        if not already_set then
+                            queued_editor_id_move = {["i"] = i, ["id"] = id}
+                            already_set = true
+                        end
+
+                        -- Limit the search results to 200 and break out early
+                        if #last_search_results > 200 then
+                            break
+                        end
                     end
                 end
+            end
+
+            local search_by_name_active = imgui.is_item_active()
+
+            if imgui.is_key_pressed(ENTER) then
+                imgui.open_popup("Search_Results_Name")
+            elseif not imgui.is_popup_open("Search_Results_Name") and search_by_name_active then
+                -- Display a tooltip instead of a popup.
+                imgui.begin_tooltip()
+                    for i, node in ipairs(last_search_results) do
+                        display_node(tree, node)
+                    end
+                imgui.end_tooltip()
+            end
+
+            if imgui.begin_popup("Search_Results_Name") then
+                for i, node in ipairs(last_search_results) do
+                    display_node(tree, node)
+                end
+    
+                imgui.end_popup()
             end
 
             imgui.end_menu()
