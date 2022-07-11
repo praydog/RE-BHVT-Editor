@@ -850,7 +850,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
         --------------------------------------------------
         ----------- NODE TRANSITION CONDITONS ------------
         --------------------------------------------------
-        if imgui.tree_node("Transition Conditions") then
+        local draw_conditions = function(transition_array, transition_array_name)
             local changed = false
 
             if selection_map[tree] == nil then
@@ -866,7 +866,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 first_times = {}
 
                 --node:append_action(action_map[tree][selection].index)
-                node_data:get_transition_conditions():push_back(condition_map[tree][selection].index)
+                transition_array:push_back(condition_map[tree][selection].index)
                 selection_map[tree][node:get_id()] = selection
             end
             
@@ -880,15 +880,15 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 last_layer:call("setCurrentNode(System.UInt64, via.behaviortree.SetNodeInfo, via.motion.SetMotionTransitionInfo)", copy_node:get_id(), nil, nil)
 
                 --if copy_node ~= nil then
-                    for j=0, copy_node_data:get_transition_conditions():size() do
+                    for j=0, copy_node_data[transition_array_name](copy_node_data):size() do
                         --node:append_action(find_action_index(tree, v))
                         local v = tree:get_condition(j)
-                        node_data:get_transition_conditions():push_back(v)
+                        transition_array:push_back(v)
                     end
                 --end
             end
 
-            display_bhvt_array(tree, node, node_data:get_transition_conditions(), tree.get_condition,
+            display_bhvt_array(tree, node, transition_array, tree.get_condition,
                 -- display predicate
                 function(tree, i, node, element)
                     if element == nil then
@@ -903,7 +903,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                         return
                     end
 
-                    local global_index = node_data:get_transition_conditions()[i]
+                    local global_index = transition_array[i]
 
                     local duped_element = nil
                     local duped_index = 0
@@ -917,11 +917,14 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                     end
 
                     if duped_element ~= nil then
-                        node_data:get_transition_conditions():push_back(duped_index)
+                        transition_array:push_back(duped_index)
                     end
                 end
             )
+        end
 
+        if imgui.tree_node("Transition Conditions") then
+            draw_conditions(node_data:get_transition_conditions(), "get_transition_conditions")
             imgui.tree_pop()
         end
 
@@ -1088,10 +1091,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
         end
 
         if imgui.tree_node("Conditions") then
-            for i, child in ipairs(node:get_conditions()) do
-                display_condition(tostring(i) .. ": " .. child:get_type_definition():get_full_name(), child)
-            end
-
+            draw_conditions(node_data:get_conditions(), "get_conditions")
             imgui.tree_pop()
         end
 
@@ -1852,7 +1852,7 @@ draw_node = function(i, seen)
         end
     )
 
-    if imgui.begin_popup_context_item(node_descriptor.name, 1) then
+    --[[if imgui.begin_popup_context_item(node_descriptor.name, 1) then
         if active_tree ~= nil then
             if imgui.button("Isolate") then
                 queued_editor_id_move = {["i"] = i, ["id"] = active_tree:get_node(i):get_id()}
@@ -1864,7 +1864,7 @@ draw_node = function(i, seen)
         end
 
         imgui.end_popup()
-    end
+    end]]
 
     node_map[i] = node
 
