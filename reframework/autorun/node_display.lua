@@ -3,6 +3,36 @@ if imnodes == nil or imgui.set_next_window_size == nil then
     return
 end
 
+local ImGuiStyleVar =
+{
+    --Enum name --------------------- --Member in ImGuiStyle structure (see ImGuiStyle for descriptions)
+    ImGuiStyleVar_Alpha=0,               --float     Alpha
+    ImGuiStyleVar_WindowPadding=1,       --ImVec2    WindowPadding
+    ImGuiStyleVar_WindowRounding=2,      --float     WindowRounding
+    ImGuiStyleVar_WindowBorderSize=3,    --float     WindowBorderSize
+    ImGuiStyleVar_WindowMinSize=4,       --ImVec2    WindowMinSize
+    ImGuiStyleVar_WindowTitleAlign=5,    --ImVec2    WindowTitleAlign
+    ImGuiStyleVar_ChildRounding=6,       --float     ChildRounding
+    ImGuiStyleVar_ChildBorderSize=7,     --float     ChildBorderSize
+    ImGuiStyleVar_PopupRounding=8,       --float     PopupRounding
+    ImGuiStyleVar_PopupBorderSize=9,     --float     PopupBorderSize
+    ImGuiStyleVar_FramePadding=10,        --ImVec2    FramePadding
+    ImGuiStyleVar_FrameRounding=11,       --float     FrameRounding
+    ImGuiStyleVar_FrameBorderSize=12,     --float     FrameBorderSize
+    ImGuiStyleVar_ItemSpacing=13,         --ImVec2    ItemSpacing
+    ImGuiStyleVar_ItemInnerSpacing=14,    --ImVec2    ItemInnerSpacing
+    ImGuiStyleVar_IndentSpacing=15,       --float     IndentSpacing
+    ImGuiStyleVar_CellPadding=16,         --ImVec2    CellPadding
+    ImGuiStyleVar_ScrollbarSize=17,       --float     ScrollbarSize
+    ImGuiStyleVar_ScrollbarRounding=18,   --float     ScrollbarRounding
+    ImGuiStyleVar_GrabMinSize=19,         --float     GrabMinSize
+    ImGuiStyleVar_GrabRounding=20,        --float     GrabRounding
+    ImGuiStyleVar_TabRounding=21,         --float     TabRounding
+    ImGuiStyleVar_ButtonTextAlign=22,     --ImVec2    ButtonTextAlign
+    ImGuiStyleVar_SelectableTextAlign=23, --ImVec2    SelectableTextAlign
+    ImGuiStyleVar_COUNT=24
+};
+
 local cached_node_names = {}
 local cached_node_indices = {}
 
@@ -1602,25 +1632,48 @@ local SIDEBAR_BASE_WIDTH = 500
 
 local panning_decay = Vector2f.new(0, 0)
 
+local HORIZONTAL_ARROW_INDENT = 50
+
+local VERTICAL_ARROW_INDENT = math.floor(HORIZONTAL_ARROW_INDENT / 2)
+
 local function perform_panning()
+
     local panning = imnodes.editor_get_panning()
     local new_panning = panning:clone()
 
-    if imgui.is_key_down(LEFT_ARROW) then
-        new_panning.x = panning.x + cfg.pan_speed * delta_time
+    imgui.indent(VERTICAL_ARROW_INDENT)
+
+    local arrow_active = function(name, idx)
+        return imgui.arrow_button(name, idx) or imgui.is_item_active()
     end
 
-    if imgui.is_key_down(RIGHT_ARROW) then
-        new_panning.x = panning.x - cfg.pan_speed * delta_time
-    end
-
-    if imgui.is_key_down(UP_ARROW) then
+    if arrow_active("Pan_Up", 2) or imgui.is_key_down(UP_ARROW) then
         new_panning.y = panning.y + cfg.pan_speed  * delta_time
     end
 
-    if imgui.is_key_down(DOWN_ARROW) then
+    imgui.unindent(VERTICAL_ARROW_INDENT)
+
+    if arrow_active("Pan_Left", 0) or imgui.is_key_down(LEFT_ARROW) then
+        new_panning.x = panning.x + cfg.pan_speed * delta_time
+    end
+
+    
+    imgui.same_line()
+    imgui.indent(HORIZONTAL_ARROW_INDENT)
+
+
+    if arrow_active("Pan_Right", 1) or imgui.is_key_down(RIGHT_ARROW) then
+        new_panning.x = panning.x - cfg.pan_speed * delta_time
+    end
+
+    imgui.unindent(HORIZONTAL_ARROW_INDENT)
+    imgui.indent(VERTICAL_ARROW_INDENT)
+
+    if arrow_active("Pan_Down", 3) or imgui.is_key_down(DOWN_ARROW) then
         new_panning.y = panning.y - cfg.pan_speed * delta_time
     end
+
+    imgui.unindent(VERTICAL_ARROW_INDENT)
 
     local panning_delta = new_panning - panning
 
@@ -1712,7 +1765,9 @@ local function draw_stupid_editor(name)
         imgui.text(tostring(#imnodes.get_selected_nodes()) .. " selected nodes")
 
         imgui.separator()
+        imgui.push_item_width(100)
         changed, cfg.default_node = imgui.slider_int("Display Node", cfg.default_node, 0, #custom_tree)
+        imgui.pop_item_width()
 
         imgui.separator()
 
@@ -1801,15 +1856,18 @@ local function draw_stupid_editor(name)
 
             -- Tree overview
             if layer ~= nil and tree ~= nil then
-                if imgui.begin_child_window("Tree", Vector2f.new(SIDEBAR_BASE_WIDTH, ws.y - 150), true) then
+                if imgui.begin_child_window("Tree", Vector2f.new(SIDEBAR_BASE_WIDTH, ws.y - 50), true) then
                     last_layer = layer
                     display_internal_handle_body(layer, tree, 0)
                     imgui.end_child_window()
                 end
             end
 
+            was_hovering_sidebar = imgui.is_item_hovered((1 << 5))
+
             imgui.end_child_window()
-            was_hovering_sidebar = imgui.is_item_hovered(-1)
+
+            was_hovering_sidebar = was_hovering_sidebar or imgui.is_item_hovered((1 << 5))
         else
             was_hovering_sidebar = false
         end
@@ -1960,10 +2018,13 @@ local function draw_stupid_editor(name)
 end
 
 local EDITOR_SIZE = {
-    x = imgui.get_display_size().x / 4, y = imgui.get_display_size().y / 2
+    x = math.max(imgui.get_display_size().x / 4, 640),
+    y = math.max(imgui.get_display_size().y / 2, 480)
 }
 
 re.on_frame(function()
+    imgui.push_style_var(ImGuiStyleVar.ImGuiStyleVar_WindowRounding, 10.0)
+
     delta_time = os.clock() - last_time
 
     local disp_size = imgui.get_display_size()
@@ -1972,4 +2033,6 @@ re.on_frame(function()
     draw_stupid_editor("Behavior Tree Editor v0.1337")
 
     last_time = os.clock()
+
+    imgui.pop_style_var()
 end)
