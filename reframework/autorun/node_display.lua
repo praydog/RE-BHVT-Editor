@@ -40,6 +40,8 @@ local node_input = 1
 local node_replace_input = 1
 local action_map = {}
 local action_name_map = {}
+local event_map = {}
+local event_name_map = {}
 local condition_map = {}
 local condition_name_map = {}
 local selection_map = {}
@@ -164,29 +166,32 @@ local function duplicate_global_static_condition(tree, i)
 end
 
 local function cache_node_indices(sorted_nodes, tree)
-    if cached_node_indices[tree:as_memoryview():address()] ~= nil then
+    if cached_node_indices[tree] ~= nil then
         return
     end
 
-    cached_node_indices[tree:as_memoryview():address()] = {}
+    cached_node_indices[tree] = {}
 
     for i=0, tree:get_node_count()-1 do
         local node = tree:get_node(i)
 
         if node then
-            cached_node_indices[tree:as_memoryview():address()][node:as_memoryview():address()] = i
+            cached_node_indices[tree][node:as_memoryview():address()] = i
         end
     end
 
-    action_map[tree:as_memoryview():address()] = {}
-    action_name_map[tree:as_memoryview():address()] = {}
+    action_map[tree] = {}
+    action_name_map[tree] = {}
 
-    node_map[tree:as_memoryview():address()] = {}
-    node_names[tree:as_memoryview():address()] = {}
+    event_map[tree] = {}
+    event_name_map[tree] = {}
+
+    node_map[tree] = {}
+    node_names[tree] = {}
     
     for k, node in pairs(sorted_nodes) do
-        table.insert(node_map[tree:as_memoryview():address()], node)
-        table.insert(node_names[tree:as_memoryview():address()], tostring(cached_node_indices[tree:as_memoryview():address()][node:as_memoryview():address()]) .. ": " .. node:get_full_name())
+        table.insert(node_map[tree], node)
+        table.insert(node_names[tree], tostring(cached_node_indices[tree][node:as_memoryview():address()]) .. ": " .. node:get_full_name())
     end
 end
 
@@ -269,8 +274,18 @@ local function get_sorted_nodes(tree)
 end
 
 local find_action_index = function(tree, action)
-    for i, v in ipairs(action_map[tree:as_memoryview():address()]) do
+    for i, v in ipairs(action_map[tree]) do
         if v.action == action then
+            return v.index
+        end
+    end
+
+    return 0
+end
+
+local find_event_index = function(tree, event)
+    for i, v in ipairs(event_map[tree]) do
+        if v.event == event then
             return v.index
         end
     end
@@ -304,34 +319,94 @@ local function display_action(tree, i, node, name, action)
                 node:replace_action(i-1, tonumber(input_text))
             end]]
 
-            if selection_map[tree:as_memoryview():address()] == nil then
-                selection_map[tree:as_memoryview():address()] = {}
+            if selection_map[tree] == nil then
+                selection_map[tree] = {}
             end
 
-            local selection = selection_map[tree:as_memoryview():address()][i]
+            local selection = selection_map[tree][i]
 
             if selection == nil then
                 selection = 1
             end
 
-            for j, v in ipairs(action_map[tree:as_memoryview():address()]) do
+            for j, v in ipairs(action_map[tree]) do
                 if v.action == action then
                     selection = j
                     break
                 end
             end
 
-            changed, selection = imgui.combo("Replace Action", selection, action_name_map[tree:as_memoryview():address()])
+            changed, selection = imgui.combo("Replace Action", selection, action_name_map[tree])
 
             if changed then
                 first_times = {}
 
-                node:get_data():get_actions()[i] = action_map[tree:as_memoryview():address()][selection].index
-                selection_map[tree:as_memoryview():address()][i] = selection
+                node:get_data():get_actions()[i] = action_map[tree][selection].index
+                selection_map[tree][i] = selection
             end
         end
 
         object_explorer:handle_address(action)
+        
+
+        imgui.tree_pop()
+    end
+end
+
+local function display_event(tree, i, j, node, name, event)
+    local enabled = event:call("get_Enabled")
+    local status = enabled and "ON" or "OFF"
+    if imgui.button(status) then
+        event:call("set_Enabled", not enabled)
+        enabled = not enabled
+    end
+    
+    imgui.same_line()
+    local made = imgui.tree_node(tostring(i) .. ": ")
+    imgui.same_line()
+    imgui.text(name)
+    if made then
+        if node ~= nil then
+            if event ~= nil then
+                imgui.input_text("Address", string.format("%X", event:get_address()))
+            end
+
+            local input_text = tostring(node_replace_input)
+            local changed = false
+            --[[changed, input_text = imgui.input_text("Replace event", input_text, 1 << 5)
+
+            if changed then
+                node:replace_event(i-1, tonumber(input_text))
+            end]]
+
+            if selection_map[tree] == nil then
+                selection_map[tree] = {}
+            end
+
+            local selection = selection_map[tree][i]
+
+            if selection == nil then
+                selection = 1
+            end
+
+            for j, v in ipairs(event_map[tree]) do
+                if v.event == event then
+                    selection = j
+                    break
+                end
+            end
+
+            changed, selection = imgui.combo("Replace event", selection, event_name_map[tree])
+
+            if changed then
+                first_times = {}
+
+                node:get_data():get_transition_events()[i][j] = event_map[tree][selection].index
+                selection_map[tree][i] = selection
+            end
+        end
+
+        object_explorer:handle_address(event)
         
 
         imgui.tree_pop()
@@ -349,30 +424,30 @@ local function display_condition(tree, i, node, name, cond)
         if node ~= nil then
             local changed = false
 
-            if condition_selection_map[tree:as_memoryview():address()] == nil then
-                condition_selection_map[tree:as_memoryview():address()] = {}
+            if condition_selection_map[tree] == nil then
+                condition_selection_map[tree] = {}
             end
     
-            local selection = condition_selection_map[tree:as_memoryview():address()][i]
+            local selection = condition_selection_map[tree][i]
     
             if selection == nil then
                 selection = 1
             end
     
-            for j, v in ipairs(condition_map[tree:as_memoryview():address()]) do
+            for j, v in ipairs(condition_map[tree]) do
                 if v.condition == cond then
                     selection = j
                     break
                 end
             end
 
-            changed, selection = imgui.combo("Replace Condition", selection, condition_name_map[tree:as_memoryview():address()])
+            changed, selection = imgui.combo("Replace Condition", selection, condition_name_map[tree])
 
             if changed then
                 first_times = {}
 
-                node:get_data():get_transition_conditions()[i] = condition_map[tree:as_memoryview():address()][selection].index
-                condition_selection_map[tree:as_memoryview():address()][i] = selection
+                node:get_data():get_transition_conditions()[i] = condition_map[tree][selection].index
+                condition_selection_map[tree][i] = selection
             end
 
             changed, replace_condition_id_text = imgui.input_text("Replace Condition by ID", replace_condition_id_text, 1 << 5)
@@ -420,7 +495,7 @@ local function display_bhvt_array(tree, node, bhvt_array, tree_func, predicate, 
                 bhvt_array:push_back(bhvt_array[i])
             end
 
-            --[[for j, v in pairs(action_map[tree:as_memoryview():address()]) do
+            --[[for j, v in pairs(action_map[tree]) do
                 if v.action == child then
                     bhvt_array:push_back(v.index)
                     break
@@ -486,19 +561,19 @@ local function display_node_replacement(text, tree, node, node_array, node_array
     local node_data = node:get_data()
 
     if node_array ~= nil then
-        if selection_map[tree:as_memoryview():address()] == nil then
-            selection_map[tree:as_memoryview():address()] = {}
-            selection_map[tree:as_memoryview():address()][node:get_id()] = 1
+        if selection_map[tree] == nil then
+            selection_map[tree] = {}
+            selection_map[tree][node:get_id()] = 1
         end
 
         local changed = false
-        local selection = selection_map[tree:as_memoryview():address()][node:get_id()] 
-        changed, selection = imgui.combo(text, selection, node_names[tree:as_memoryview():address()])
+        local selection = selection_map[tree][node:get_id()] 
+        changed, selection = imgui.combo(text, selection, node_names[tree])
 
         if changed then
             local target_node = node_map[tree:as_memoryview():get_address()][selection]
-            node_array[node_array_idx] = cached_node_indices[tree:as_memoryview():address()][target_node:as_memoryview():address()]
-            selection_map[tree:as_memoryview():address()][node:get_id()] = selection
+            node_array[node_array_idx] = cached_node_indices[tree][target_node:as_memoryview():address()]
+            selection_map[tree][node:get_id()] = selection
         end
     end
 end
@@ -507,19 +582,19 @@ local function display_node_addition(text, tree, node, node_array)
     local node_data = node:get_data()
 
     if node_array ~= nil then
-        if selection_map[tree:as_memoryview():address()] == nil then
-            selection_map[tree:as_memoryview():address()] = {}
-            selection_map[tree:as_memoryview():address()][node:get_id()] = 1
+        if selection_map[tree] == nil then
+            selection_map[tree] = {}
+            selection_map[tree][node:get_id()] = 1
         end
 
         local changed = false
-        local selection = selection_map[tree:as_memoryview():address()][node:get_id()] 
-        changed, selection = imgui.combo(text, selection, node_names[tree:as_memoryview():address()])
+        local selection = selection_map[tree][node:get_id()] 
+        changed, selection = imgui.combo(text, selection, node_names[tree])
 
         if changed then
             local target_node = node_map[tree:as_memoryview():get_address()][selection]
-            node_array:push_back(cached_node_indices[tree:as_memoryview():address()][target_node:as_memoryview():address()])
-            selection_map[tree:as_memoryview():address()][node:get_id()] = selection
+            node_array:push_back(cached_node_indices[tree][target_node:as_memoryview():address()])
+            selection_map[tree][node:get_id()] = selection
 
             -- add dummy (-1) transitions so the game doesn't crash
             --local node_data = node:get_data()
@@ -533,10 +608,13 @@ end
 local transition_state_id_text = "0"
 local replace_node_id_text = "0"
 local add_action_id_text = "0"
+local add_event_id_text = "0"
 
 local queued_editor_id_move = nil
 
 local function display_node(tree, node, node_array, node_array_idx, cond)
+    local changed = false
+
     imgui.push_id(node:get_id())
 
     if imgui.button("Goto") then
@@ -564,7 +642,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
 
     imgui.same_line()
 
-    local node_name = cached_node_indices[tree:as_memoryview():address()][node:as_memoryview():address()] .. ": " .. node:get_full_name()
+    local node_name = cached_node_indices[tree][node:as_memoryview():address()] .. ": " .. node:get_full_name()
 
     local made_node = imgui.tree_node(node_name)
 
@@ -612,23 +690,21 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
         imgui.text("[" .. tostring(#node:get_actions()) .. "]")
 
         if made then
-            local changed = false
-
-            if selection_map[tree:as_memoryview():address()] == nil then
-                selection_map[tree:as_memoryview():address()] = {}
-                selection_map[tree:as_memoryview():address()][node:get_id()] = 1
+            if selection_map[tree] == nil then
+                selection_map[tree] = {}
+                selection_map[tree][node:get_id()] = 1
             end
 
-            local selection = selection_map[tree:as_memoryview():address()][node:get_id()] 
+            local selection = selection_map[tree][node:get_id()] 
 
-            changed, selection = imgui.combo("Add Action", selection, action_name_map[tree:as_memoryview():address()])
+            changed, selection = imgui.combo("Add Action", selection, action_name_map[tree])
 
             if changed then
                 first_times = {}
 
-                --node:append_action(action_map[tree:as_memoryview():address()][selection].index)
-                node_data:get_actions():push_back(action_map[tree:as_memoryview():address()][selection].index)
-                selection_map[tree:as_memoryview():address()][node:get_id()] = selection
+                --node:append_action(action_map[tree][selection].index)
+                node_data:get_actions():push_back(action_map[tree][selection].index)
+                selection_map[tree][node:get_id()] = selection
             end
             
             changed, add_action_id_text = imgui.input_text("Add Action by ID", add_action_id_text, 1 << 5)
@@ -639,7 +715,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 node_data:get_actions():push_back(tonumber(add_action_id_text))
             end
 
-            changed, selection = imgui.combo("Copy from", selection, node_names[tree:as_memoryview():address()])
+            changed, selection = imgui.combo("Copy from", selection, node_names[tree])
 
             if changed then
                 first_times = {}
@@ -750,24 +826,24 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
         if imgui.tree_node("Transition Conditions") then
             local changed = false
 
-            if selection_map[tree:as_memoryview():address()] == nil then
-                selection_map[tree:as_memoryview():address()] = {}
-                selection_map[tree:as_memoryview():address()][node:get_id()] = 1
+            if selection_map[tree] == nil then
+                selection_map[tree] = {}
+                selection_map[tree][node:get_id()] = 1
             end
 
-            local selection = selection_map[tree:as_memoryview():address()][node:get_id()] 
+            local selection = selection_map[tree][node:get_id()] 
 
-            changed, selection = imgui.combo("Add Condition", selection, condition_name_map[tree:as_memoryview():address()])
+            changed, selection = imgui.combo("Add Condition", selection, condition_name_map[tree])
 
             if changed then
                 first_times = {}
 
-                --node:append_action(action_map[tree:as_memoryview():address()][selection].index)
-                node_data:get_transition_conditions():push_back(condition_map[tree:as_memoryview():address()][selection].index)
-                selection_map[tree:as_memoryview():address()][node:get_id()] = selection
+                --node:append_action(action_map[tree][selection].index)
+                node_data:get_transition_conditions():push_back(condition_map[tree][selection].index)
+                selection_map[tree][node:get_id()] = selection
             end
             
-            changed, selection = imgui.combo("Copy from", selection, node_names[tree:as_memoryview():address()])
+            changed, selection = imgui.combo("Copy from", selection, node_names[tree])
 
             if changed then
                 first_times = {}
@@ -894,6 +970,11 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
         ----------- NODE TRANSITION EVENTS ---------------
         --------------------------------------------------
         if imgui.tree_node("Transition Events") then
+            if selection_map[tree] == nil then
+                selection_map[tree] = {}
+                selection_map[tree][node:get_id()] = 1
+            end
+
             display_bhvt_array(tree, node, node_data:get_transition_events(), 
                 function(tree, x)
                     return x
@@ -902,6 +983,25 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                     local evts = element
 
                     if imgui.tree_node(tostring(i) .. " [" .. tostring(evts:size()) .. "]") then
+                        local selection = selection_map[tree][node:get_id()] 
+
+                        changed, selection = imgui.combo("Add event", selection, event_name_map[tree])
+            
+                        if changed then
+                            first_times = {}
+            
+                            evts:push_back(event_map[tree][selection].index)
+                            selection_map[tree][node:get_id()] = selection
+                        end
+                        
+                        changed, add_event_id_text = imgui.input_text("Add event by ID", add_event_id_text, 1 << 5)
+            
+                        if changed then
+                            first_times = {}
+            
+                            evts:push_back(tonumber(add_event_id_text))
+                        end
+
                         if evts:size() == 0 then
                             imgui.text("[ EMPTY ]")
                             return
@@ -914,26 +1014,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                                 return tree:get_transitions()[x]
                             end,
                             function(tree, j, node, element_tree)
-                                if element_tree ~= nil then
-                                    local enabled = element_tree:call("get_Enabled")
-                                    local status = enabled and "ON" or "OFF"
-                                    if imgui.button(status) then
-                                        element_tree:call("set_Enabled", not enabled)
-                                        enabled = not enabled
-                                    end
-
-                                    imgui.same_line()
-
-                                    local evts_tree = tree:get_transitions()[j]
-
-                                    if imgui.tree_node(tostring(j) .. " " .. tostring(evts[j]) .. ": " .. tostring(element_tree:get_type_definition():get_full_name())) then
-                                        object_explorer:handle_address(element_tree)
-                                        --display_event(tree, i, node, element) -- TODO, DO THAT ONE!
-                                        imgui.tree_pop()
-                                    end
-                                else
-                                    imgui.text("[ NULL ]")
-                                end
+                                display_event(tree, i, j, node, tostring(evts[j]) .. ": " .. tostring(element_tree:get_type_definition():get_full_name()), element_tree) -- TODO, DO THAT ONE!
                             end
                         )
 
@@ -995,12 +1076,14 @@ local function cache_tree(core, tree)
     local now = os.clock()
 
     --if now - last_action_update_time > 0.5 then
-    if first_times[tree:as_memoryview():address()] == nil then
-        first_times[tree:as_memoryview():address()] = true
-        action_map[tree:as_memoryview():address()] = {}
-        action_name_map[tree:as_memoryview():address()] = {}
-        condition_map[tree:as_memoryview():address()] = {}
-        condition_name_map[tree:as_memoryview():address()] = {}
+    if first_times[tree] == nil then
+        first_times[tree] = true
+        action_map[tree] = {}
+        action_name_map[tree] = {}
+        event_map[tree] = {}
+        event_name_map[tree] = {}
+        condition_map[tree] = {}
+        condition_name_map[tree] = {}
 
         local action_count = tree:get_action_count()
         
@@ -1008,8 +1091,19 @@ local function cache_tree(core, tree)
             local action = tree:get_action(i)
     
             if action ~= nil then
-                table.insert(action_map[tree:as_memoryview():address()], {index=i, ["action"]=action})
-                table.insert(action_name_map[tree:as_memoryview():address()], tostring(i) .. ": " .. action:get_type_definition():get_full_name())
+                table.insert(action_map[tree], {index=i, ["action"]=action})
+                table.insert(action_name_map[tree], tostring(i) .. ": " .. action:get_type_definition():get_full_name())
+            end
+        end
+
+        local transition_event_count = tree:get_transition_count()
+
+        for i=0, transition_event_count-1 do
+            local evt = tree:get_transition(i)
+
+            if evt ~= nil then
+                table.insert(event_map[tree], {index=i, ["event"]=evt})
+                table.insert(event_name_map[tree], tostring(i) .. ": " .. evt:get_type_definition():get_full_name())
             end
         end
 
@@ -1020,8 +1114,8 @@ local function cache_tree(core, tree)
             local condition = tree:get_condition(real_index)
     
             if condition ~= nil then
-                table.insert(condition_map[tree:as_memoryview():address()], {index=real_index, ["condition"]=condition})
-                table.insert(condition_name_map[tree:as_memoryview():address()], tostring(real_index) .. ": " .. condition:get_type_definition():get_full_name())
+                table.insert(condition_map[tree], {index=real_index, ["condition"]=condition})
+                table.insert(condition_name_map[tree], tostring(real_index) .. ": " .. condition:get_type_definition():get_full_name())
             end
         end
 
@@ -1031,8 +1125,8 @@ local function cache_tree(core, tree)
             local condition = tree:get_condition(i)
     
             if condition ~= nil then
-                table.insert(condition_map[tree:as_memoryview():address()], {index=i, ["condition"]=condition})
-                table.insert(condition_name_map[tree:as_memoryview():address()], tostring(i) .. ": " .. condition:get_type_definition():get_full_name())
+                table.insert(condition_map[tree], {index=i, ["condition"]=condition})
+                table.insert(condition_name_map[tree], tostring(i) .. ": " .. condition:get_type_definition():get_full_name())
             end
         end
 
