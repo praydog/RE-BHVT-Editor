@@ -853,7 +853,9 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                     imgui.text(tostring(i))
                     imgui.same_line()
                     --local changed, val = imgui.drag_int(tostring(i), element, 1)
+                    imgui.push_item_width(150)
                     local changed, val = imgui.input_text(tostring(i), tostring(element))
+                    imgui.pop_item_width()
 
                     if changed then
                         first_times = {}
@@ -874,7 +876,9 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                     imgui.text(tostring(i))
                     imgui.same_line()
                     --local changed, val = imgui.drag_int(tostring(i), element, 1)
+                    imgui.push_item_width(150)
                     local changed, val = imgui.input_text(tostring(i), tostring(element))
+                    imgui.pop_item_width()
 
                     if changed then
                         first_times = {}
@@ -886,27 +890,58 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             imgui.tree_pop()
         end
 
+        --------------------------------------------------
+        ----------- NODE TRANSITION EVENTS ---------------
+        --------------------------------------------------
         if imgui.tree_node("Transition Events") then
             display_bhvt_array(tree, node, node_data:get_transition_events(), 
                 function(tree, x)
                     return x
                 end,
                 function(tree, i, node, element)
-                    imgui.text(tostring(i))
-                    imgui.same_line()
-                    --local changed, val = imgui.drag_int(tostring(i), element, 1)
-                    local changed, val = imgui.input_text(tostring(i), tostring(element))
+                    local evts = element
 
-                    if changed then
-                        first_times = {}
-                        node_data:get_transition_events()[i] = tonumber(val)
+                    if imgui.tree_node(tostring(i) .. " [" .. tostring(evts:size()) .. "]") then
+                        if evts:size() == 0 then
+                            imgui.text("[ EMPTY ]")
+                            return
+                        end
+
+                        imgui.push_id(tostring(evts:as_memoryview():get_address()))
+
+                        display_bhvt_array(tree, node, evts, 
+                            function(tree, x)
+                                return tree:get_transitions()[x]
+                            end,
+                            function(tree, j, node, element_tree)
+                                if element_tree ~= nil then
+                                    local enabled = element_tree:call("get_Enabled")
+                                    local status = enabled and "ON" or "OFF"
+                                    if imgui.button(status) then
+                                        element_tree:call("set_Enabled", not enabled)
+                                        enabled = not enabled
+                                    end
+
+                                    imgui.same_line()
+
+                                    local evts_tree = tree:get_transitions()[j]
+
+                                    if imgui.tree_node(tostring(j) .. " " .. tostring(evts[j]) .. ": " .. tostring(element_tree:get_type_definition():get_full_name())) then
+                                        object_explorer:handle_address(element_tree)
+                                        --display_event(tree, i, node, element) -- TODO, DO THAT ONE!
+                                        imgui.tree_pop()
+                                    end
+                                else
+                                    imgui.text("[ NULL ]")
+                                end
+                            end
+                        )
+
+                        imgui.pop_id()
+                        imgui.tree_pop()
                     end
                 end
             )
-
-            --[[for i, child in ipairs(node:get_transition_events()) do
-                display_condition(tostring(i) .. ": " .. child:get_type_definition():get_full_name(), child)
-            end]]
 
             imgui.tree_pop()
         end
@@ -915,6 +950,30 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             for i, child in ipairs(node:get_conditions()) do
                 display_condition(tostring(i) .. ": " .. child:get_type_definition():get_full_name(), child)
             end
+
+            imgui.tree_pop()
+        end
+
+        if imgui.tree_node("Tags") then
+            display_bhvt_array(tree, node, node_data:get_tags(), 
+                function(tree, x)
+                    return x
+                end,
+                function(tree, i, node, element)
+                    imgui.text(tostring(i))
+                    imgui.same_line()
+                    --local changed, val = imgui.drag_int(tostring(i), element, 1)
+
+                    imgui.push_item_width(150)
+                    local changed, val = imgui.input_text(tostring(i), tostring(element))
+                    imgui.pop_item_width()
+
+                    if changed then
+                        first_times = {}
+                        node_data:get_transition_ids()[i] = tonumber(val)
+                    end
+                end
+            )
 
             imgui.tree_pop()
         end
@@ -1600,11 +1659,11 @@ draw_node = function(i, seen)
     if imgui.begin_popup_context_item(node_descriptor.name, 1) then
         if active_tree ~= nil then
             if imgui.button("Isolate") then
-                cfg.default_node = i
+                queued_editor_id_move = {["i"] = i, ["id"] = active_tree:get_node(i):get_id()}
             end
 
             if imgui.button("Display parent") then
-                cfg.default_node = active_tree:get_node(i):get_data().parent
+                queued_editor_id_move = {["i"] = active_tree:get_node(i):get_data().parent, ["id"] = active_tree:get_node(active_tree:get_node(i):get_data().parent):get_id()}
             end
         end
 
@@ -1686,6 +1745,59 @@ local function perform_panning()
     end
 end
 
+local function move_to_node(id)
+    imnodes.editor_move_to_node(id)
+
+    local panning = imnodes.editor_get_panning()
+    local node_dims =  imnodes.get_node_dimensions(id)
+
+    local wnd = imgui.get_window_size()
+
+    local new_panning = {
+        x = math.floor(panning.x+(wnd.x / 2) - (node_dims.x / 2)),
+        y = math.floor(panning.y+(wnd.y / 2) - (node_dims.y / 2))
+    }
+
+    imnodes.editor_reset_panning(new_panning.x, new_panning.y)
+end
+
+local function set_base_node_to_parent(tree, i)
+    local prev_default = cfg.default_node
+
+    if cfg.display_parent_of_active and i > 0 then
+        local node = tree:get_node(i)
+        if not node then return end
+
+        local parent_i = node:get_data().parent
+
+        if parent_i > 0 then
+            cfg.default_node = parent_i
+        else
+            cfg.default_node = i
+        end
+
+        if parent_i > 0 then
+            for j=0, cfg.parent_display_depth-1 do
+                local parent_node = tree:get_node(cfg.default_node)
+
+                if parent_node then
+                    local parent = parent_node:get_data().parent
+
+                    if parent ~= 0 then
+                        cfg.default_node = parent
+                    else
+                        break
+                    end
+                else
+                    break
+                end
+            end
+        end
+    else
+        cfg.default_node = i
+    end
+end
+
 local function draw_stupid_editor(name)
     if cfg.graph_closes_with_reframework then
         if not reframework:is_drawing_ui() then return end
@@ -1696,6 +1808,26 @@ local function draw_stupid_editor(name)
         imgui.end_window()
         return 
     end]]
+
+    local tree = nil
+    local layer = nil
+
+    local player = get_localplayer()
+
+    if player ~= nil then
+        local motion_fsm2 = player:call("getComponent(System.Type)", sdk.typeof("via.motion.MotionFsm2"))
+
+        if motion_fsm2 ~= nil then
+            layer = motion_fsm2:call("getLayer", 0)
+
+            if layer ~= nil then
+                tree = layer:get_tree_object()
+
+                if tree ~= nil then
+                end
+            end
+        end
+    end
 
     local changed = false
     local now = os.clock()
@@ -1760,38 +1892,23 @@ local function draw_stupid_editor(name)
             imgui.end_menu()
         end
 
-
+        -- Selected node
         imgui.separator()
         imgui.text(tostring(#imnodes.get_selected_nodes()) .. " selected nodes")
 
+        -- Display node
         imgui.separator()
         imgui.push_item_width(100)
         changed, cfg.default_node = imgui.slider_int("Display Node", cfg.default_node, 0, #custom_tree)
+        if changed and tree ~= nil and cfg.default_node < tree:get_node_count() then
+            queued_editor_id_move = {["i"] = cfg.default_node, ["id"] = tree:get_node(cfg.default_node):get_id()}
+        end
+
         imgui.pop_item_width()
 
         imgui.separator()
 
         imgui.end_menu_bar()
-    end
-
-    local tree = nil
-    local layer = nil
-
-    local player = get_localplayer()
-
-    if player ~= nil then
-        local motion_fsm2 = player:call("getComponent(System.Type)", sdk.typeof("via.motion.MotionFsm2"))
-
-        if motion_fsm2 ~= nil then
-            layer = motion_fsm2:call("getLayer", 0)
-
-            if layer ~= nil then
-                tree = layer:get_tree_object()
-
-                if tree ~= nil then
-                end
-            end
-        end
     end
 
     if (tree ~= nil and (active_tree == nil or tree:as_memoryview():address() ~= active_tree:as_memoryview():address())) then
@@ -1876,60 +1993,8 @@ local function draw_stupid_editor(name)
     end
 
     imnodes.begin_node_editor()
+
     perform_panning()
-
-    local move_to_node = function(id)
-        imnodes.editor_move_to_node(id)
-
-        local panning = imnodes.editor_get_panning()
-        local node_dims =  imnodes.get_node_dimensions(id)
-
-        local wnd = imgui.get_window_size()
-
-        local new_panning = {
-            x = math.floor(panning.x+(wnd.x / 2) - (node_dims.x / 2)),
-            y = math.floor(panning.y+(wnd.y / 2) - (node_dims.y / 2))
-        }
-
-        imnodes.editor_reset_panning(new_panning.x, new_panning.y)
-    end
-
-    local set_base_node_to_parent = function(i)
-        local prev_default = cfg.default_node
-
-        if cfg.display_parent_of_active then
-            local node = tree:get_node(i)
-            if not node then return end
-
-            local parent_i = node:get_data().parent
-
-            if parent_i > 0 then
-                cfg.default_node = parent_i
-            else
-                cfg.default_node = i
-            end
-
-            if parent_i > 0 then
-                for j=0, cfg.parent_display_depth-1 do
-                    local parent_node = tree:get_node(cfg.default_node)
-
-                    if parent_node then
-                        local parent = parent_node:get_data().parent
-
-                        if parent ~= 0 then
-                            cfg.default_node = parent
-                        else
-                            break
-                        end
-                    else
-                        break
-                    end
-                end
-            end
-        else
-            cfg.default_node = i
-        end
-    end
 
     if layer ~= nil and tree ~= nil then
         if queued_editor_id_move ~= nil then
@@ -1948,7 +2013,7 @@ local function draw_stupid_editor(name)
                     cfg.default_node = queued_editor_id_move.i
                 end]]
 
-                set_base_node_to_parent(queued_editor_id_move.i)
+                set_base_node_to_parent(tree, queued_editor_id_move.i)
                 queued_editor_id_move_step2 = queued_editor_id_move.id
                 queued_editor_id_start_time = os.clock()
                 cfg.follow_active_nodes = false
@@ -1964,7 +2029,7 @@ local function draw_stupid_editor(name)
                 if (node:get_status1() == 2 or node:get_status2() == 2) and #node:get_children() == 0 then
                     local prev_default = cfg.default_node
 
-                    set_base_node_to_parent(i)
+                    set_base_node_to_parent(tree, i)
 
                     queued_editor_id_move_step2 = node:get_id()
                     queued_editor_id_start_time = os.clock()
@@ -2006,7 +2071,25 @@ local function draw_stupid_editor(name)
         imnodes.minimap(0.5, 0)
     end
 
+    -- Editor context menu
+    if not node_is_hovered then
+        if not imgui.is_popup_open("", (1 << 7) | (1 << 8)) then
+            if imnodes.is_editor_hovered() and imgui.is_mouse_released(1) then
+                imgui.open_popup("EditorContextMenu")
+            end
+
+            if imgui.begin_popup("EditorContextMenu") then
+                if imgui.button("Recenter") and tree ~= nil then
+                    queued_editor_id_move = {["i"] = cfg.default_node, ["id"] = tree:get_node(cfg.default_node):get_id()}
+                end
+
+                imgui.end_popup()
+            end
+        end
+    end
+
     imnodes.end_node_editor()
+
 
     node_is_hovered, node_hovered_id = imnodes.is_node_hovered()
     node_hovered_id = node_hovered_id & 0xFFFFFFFF
