@@ -25,6 +25,7 @@ local DOWN_ARROW = imgui.get_key_index(4)
 local VK_LSHIFT = 0xA0
 
 local cfg = {
+    -- view
     always_show_node_editor = false,
     show_minimap = true,
     follow_active_nodes = false,
@@ -32,9 +33,8 @@ local cfg = {
     parent_display_depth = 0,
     default_node = 0,
     default_node_search_name = "",
-
-    -- view
     show_side_panels = true,
+    graph_closes_with_reframework = true,
 
     -- editor
     pan_speed = 1000,
@@ -1631,7 +1631,10 @@ local function perform_panning()
 end
 
 local function draw_stupid_editor(name)
-    if not reframework:is_drawing_ui() then return end
+    if cfg.graph_closes_with_reframework then
+        if not reframework:is_drawing_ui() then return end
+    end
+
     if not imgui.begin_window(name, true, 1 << 10) then return end
     --[[if not imgui.begin_child_window(name .. "2") then 
         imgui.end_window()
@@ -1649,6 +1652,7 @@ local function draw_stupid_editor(name)
         end
 
         if imgui.begin_menu("View") then
+            changed, cfg.graph_closes_with_reframework = imgui.checkbox("Graph closes with REFramework", cfg.graph_closes_with_reframework)
             changed, cfg.show_side_panels = imgui.checkbox("Show side panel", cfg.show_side_panels)
             changed, unlock_node_positioning = imgui.checkbox("Unlock Node Positioning", unlock_node_positioning)
             changed, cfg.show_minimap = imgui.checkbox("Show Minimap", cfg.show_minimap)
@@ -1701,7 +1705,8 @@ local function draw_stupid_editor(name)
         end
 
 
-        imgui.text(tostring(#imnodes.get_selected_nodes()) .. " selected nodes")
+        imgui.separator()
+            imgui.text(tostring(#imnodes.get_selected_nodes()) .. " selected nodes")
 
         imgui.end_menu_bar()
     end
