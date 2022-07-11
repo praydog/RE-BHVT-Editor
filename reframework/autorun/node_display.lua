@@ -1054,7 +1054,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                             function(tree, j, node, element_tree)
                                 display_event(tree, i, j, node, tostring(evts[j]) .. ": " .. tostring(element_tree:get_type_definition():get_full_name()), element_tree) -- TODO, DO THAT ONE!
                             end,
-                            function(i, element)
+                            function(j, element)
                                 if element == nil then
                                     return
                                 end
