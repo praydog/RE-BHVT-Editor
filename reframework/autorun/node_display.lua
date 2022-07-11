@@ -1,3 +1,8 @@
+if imnodes == nil or imgui.set_next_window_size == nil then
+    re.msg("Your REFramework version is not new enough to use the behavior tree viewer!")
+    return
+end
+
 local cached_node_names = {}
 local cached_node_indices = {}
 
@@ -1490,12 +1495,10 @@ draw_node_children = function(i, node, seen, active)
                 local crp = Vector2f.new(child_render_pos.x, child_render_pos.y)
                 local dist = (current_child_pos - crp):length()
 
-                if dist < 10 then
-                    crp = current_child_pos + ((crp - current_child_pos) * delta_time * cfg.lerp_speed)
-                elseif dist < 50 then
-                    crp = current_child_pos + ((crp - current_child_pos) * delta_time * 5.0 * cfg.lerp_speed)
+                if dist < 20 then
+                    crp = current_child_pos + ((crp - current_child_pos) * math.min(delta_time, 0.5))
                 else
-                    crp = current_child_pos + ((crp - current_child_pos) * delta_time * 10.0 * cfg.lerp_speed)
+                    crp = current_child_pos + ((crp - current_child_pos):normalized() * math.min(math.min(delta_time, 0.5) * dist * cfg.lerp_speed * 10.0, dist))
                 end
 
                 imnodes.set_node_grid_space_pos(child.id, crp.x, crp.y)
@@ -1706,7 +1709,12 @@ local function draw_stupid_editor(name)
 
 
         imgui.separator()
-            imgui.text(tostring(#imnodes.get_selected_nodes()) .. " selected nodes")
+        imgui.text(tostring(#imnodes.get_selected_nodes()) .. " selected nodes")
+
+        imgui.separator()
+        changed, cfg.default_node = imgui.slider_int("Display Node", cfg.default_node, 0, #custom_tree)
+
+        imgui.separator()
 
         imgui.end_menu_bar()
     end
