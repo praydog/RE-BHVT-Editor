@@ -579,7 +579,7 @@ local function display_node_replacement(text, tree, node, node_array, node_array
         changed, selection = imgui.combo(text, selection, node_names[tree])
 
         if changed then
-            local target_node = node_map[tree:as_memoryview():get_address()][selection]
+            local target_node = node_map[tree][selection]
             node_array[node_array_idx] = cached_node_indices[tree][target_node:as_memoryview():address()]
             selection_map[tree][node:get_id()] = selection
         end
@@ -600,7 +600,7 @@ local function display_node_addition(text, tree, node, node_array)
         changed, selection = imgui.combo(text, selection, node_names[tree])
 
         if changed then
-            local target_node = node_map[tree:as_memoryview():get_address()][selection]
+            local target_node = node_map[tree][selection]
             node_array:push_back(cached_node_indices[tree][target_node:as_memoryview():address()])
             selection_map[tree][node:get_id()] = selection
 
@@ -728,7 +728,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             if changed then
                 first_times = {}
 
-                local copy_node = node_map[tree:as_memoryview():get_address()][selection]
+                local copy_node = node_map[tree][selection]
                 last_layer:call("setCurrentNode(System.UInt64, via.behaviortree.SetNodeInfo, via.motion.SetMotionTransitionInfo)", copy_node:get_id(), nil, nil)
 
                 --if copy_node ~= nil then
@@ -818,12 +818,25 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 node_data:get_transition_attributes():push_back(0)
             end
  
-            display_bhvt_array(tree, node, node_data:get_states(), tree.get_node, function(tree, i, node, element)
-                local conditions = node:get_data():get_transition_conditions()
-                local condition = tree:get_condition(conditions[i])
+            display_bhvt_array(tree, node, node_data:get_states(), tree.get_node, 
+                function(tree, i, node, element)
+                    local conditions = node:get_data():get_transition_conditions()
+                    local condition = tree:get_condition(conditions[i])
 
-                display_node(tree, element, node_data:get_states(), i, condition)
-            end)
+                    display_node(tree, element, node_data:get_states(), i, condition)
+                end,
+                -- duplication predicate
+                function(i, element)
+                    first_times = {}
+
+                    node_data:get_states():push_back(node_data:get_states()[i])
+                    node_data:get_transition_conditions():push_back(0)
+                    node_data:get_transition_events():emplace()
+                    node_data:get_states_2():push_back(0)
+                    node_data:get_transition_ids():push_back(0)
+                    node_data:get_transition_attributes():push_back(0)
+                end
+            )
 
             imgui.tree_pop()
         end
@@ -856,7 +869,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             if changed then
                 first_times = {}
 
-                local copy_node = node_map[tree:as_memoryview():get_address()][selection]
+                local copy_node = node_map[tree][selection]
                 local copy_node_data = copy_node:get_data()
                 last_layer:call("setCurrentNode(System.UInt64, via.behaviortree.SetNodeInfo, via.motion.SetMotionTransitionInfo)", copy_node:get_id(), nil, nil)
 
