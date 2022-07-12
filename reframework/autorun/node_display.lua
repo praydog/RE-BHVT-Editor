@@ -479,6 +479,8 @@ local function display_condition(tree, i, node, name, cond)
                 add_evaluator()
             end
         else
+            imgui.text("Press CTRL+Enter for the changes to take effect.")
+
             local changed = false
 
             local cursor_screen_pos = imgui.get_cursor_screen_pos()
