@@ -1,4 +1,4 @@
-if imnodes == nil or imgui.set_next_window_size == nil then
+if imnodes == nil or imgui.set_next_window_size == nil or sdk.hook_vtable == nil then
     re.msg("Your REFramework version is not new enough to use the behavior tree viewer!")
     return
 end
@@ -55,6 +55,7 @@ local node_replacements = {
 
 }
 
+local TAB = imgui.get_key_index(0)
 local LEFT_ARROW = imgui.get_key_index(1)
 local RIGHT_ARROW = imgui.get_key_index(2)
 local UP_ARROW = imgui.get_key_index(3)
@@ -430,8 +431,93 @@ end
 
 local replace_condition_id_text = ""
 
+local custom_condition_evaluators = {}
+
 local function display_condition(tree, i, node, name, cond)
     if imgui.tree_node(name) then
+        if not custom_condition_evaluators[cond] then
+            if imgui.button("Add Lua Driven Evaluator") then
+                custom_condition_evaluators[cond] = {}
+                custom_condition_evaluators[cond].str = "return function(storage, cond, arg, retval)\n\treturn retval\nend"
+                custom_condition_evaluators[cond].eval = load(custom_condition_evaluators[cond].str)
+                custom_condition_evaluators[cond].storage = {}
+
+                local add_evaluator = function()
+                    local prev_args = nil
+    
+                    sdk.hook_vtable(
+                        cond, 
+                        cond:get_type_definition():get_method("evaluate"), 
+                        function(args)
+                            prev_args = args
+                        end,
+                        function(retval)
+                            local old_retval = sdk.to_int64(retval)
+                            local new_retval = 
+                                custom_condition_evaluators[cond].eval()(
+                                    custom_condition_evaluators[cond].storage,
+                                    sdk.to_managed_object(prev_args[2]), 
+                                    sdk.to_managed_object(prev_args[3]), 
+                                    retval
+                                )
+
+                            --[[if sdk.to_int64(new_retval) ~= old_retval then
+                                log.debug("Condition changed by Lua!" .. " " .. string.format("%i->%i", old_retval, sdk.to_int64(new_retval)))
+                            else                  
+                                if sdk.to_int64(retval) == 1 then
+                                    log.debug("Condition met!")
+                                else
+                                    log.debug("Condition not met!")
+                                end
+                            end]]
+
+                            return new_retval
+                        end
+                    )
+                end
+    
+                add_evaluator()
+            end
+        else
+            local changed = false
+
+            local cursor_screen_pos = imgui.get_cursor_screen_pos()
+            changed, custom_condition_evaluators[cond].str = imgui.input_text_multiline("Evaluator", custom_condition_evaluators[cond].str)
+    
+            if imgui.is_item_active() then
+                imgui.open_popup(tostring(cond) .. ": Evaluator")
+            end
+    
+            local last_input_width = imgui.calc_item_width()
+    
+            -- Causes the textbox to be overlayed on top of the existing textbox
+            -- because for some reason the textbox inside the node doesn't accept TAB input
+            -- however, the popup version does.
+            imgui.set_next_window_pos(cursor_screen_pos)
+    
+            if imgui.begin_popup(tostring(cond) .. ": Evaluator", (1 << 18) | (1 << 19)) then
+                imgui.set_next_item_width(last_input_width)
+                changed, custom_condition_evaluators[cond].str, tstart, tend = imgui.input_text_multiline("Evaluator", custom_condition_evaluators[cond].str, {0,0}, (1 << 5) | (1 << 10) | (1 << 8))
+        
+                if changed then
+                    local err = nil
+                    custom_condition_evaluators[cond].eval, custom_condition_evaluators[cond].err = load(custom_condition_evaluators[cond].str)
+                end
+        
+                imgui.end_popup()
+            end
+    
+    
+            --[[if changed then
+                local err = nil
+                custom_condition_evaluators[cond].eval, custom_condition_evaluators[cond].err = load(custom_condition_evaluators[cond].str)
+                
+            end]]
+            if custom_condition_evaluators[cond].err then
+                imgui.text(custom_condition_evaluators[cond].err)
+            end
+        end
+
         if cond ~= nil then
             imgui.input_text("Address", string.format("%X", cond:get_address()))
         end
