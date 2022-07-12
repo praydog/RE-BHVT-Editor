@@ -2109,7 +2109,6 @@ local function draw_stupid_editor(name)
                         local search_name = cfg.default_condition_search_name:lower()
 
                         if name:find(search_name) or search_name == tostring(i) then
-                            display_condition(tree, condition, nil)
                             table.insert(last_search_results_condition, { ["i"] = real_index, cond = condition })
 
                             -- Limit the search results to 200 and break out early
@@ -2128,7 +2127,6 @@ local function draw_stupid_editor(name)
                         local search_name = cfg.default_condition_search_name:lower()
 
                         if name:find(search_name) or search_name == tostring(i) then
-                            display_condition(tree, condition, nil)
                             table.insert(last_search_results_condition, { ["i"] = i, cond = condition })
 
                             -- Limit the search results to 200 and break out early
@@ -2199,7 +2197,7 @@ local function draw_stupid_editor(name)
                     end
 
                     for i, cond in ipairs(last_search_results_condition) do
-                        display_condition(tree, nil, nil, tostring(cond.i) .. ": " .. cond.cond:get_type_definition():get_full_name(), cond)
+                        display_condition(tree, nil, nil, tostring(cond.i) .. ": " .. cond.cond:get_type_definition():get_full_name(), cond.cond)
                     end
 
                     for i, act in ipairs(last_search_results_action) do
@@ -2214,7 +2212,7 @@ local function draw_stupid_editor(name)
                 end
     
                 for i, cond in ipairs(last_search_results_condition) do
-                    display_condition(tree, nil, nil, tostring(cond.i) .. ": " .. cond.cond:get_type_definition():get_full_name(), cond)
+                    display_condition(tree, nil, nil, tostring(cond.i) .. ": " .. cond.cond:get_type_definition():get_full_name(), cond.cond)
                 end
 
                 for i, act in ipairs(last_search_results_action) do
