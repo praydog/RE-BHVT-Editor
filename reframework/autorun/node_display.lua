@@ -83,6 +83,7 @@ local cfg = {
     default_node_search_name = "",
     default_condition_search_name = "",
     default_action_search_name = "",
+    search_allow_duplicates = true
 }
 
 local cfg_path = "bhvteditor/main_config.json"
@@ -1997,6 +1998,7 @@ end
 local last_search_results_node = {}
 local last_search_results_condition = {}
 local last_search_results_action = {}
+local last_search_results_set = {} -- to prevent duplicates in the search (optional)
 
 local function draw_stupid_editor(name)
     if cfg.graph_closes_with_reframework then
@@ -2056,11 +2058,16 @@ local function draw_stupid_editor(name)
             imgui.text("Results will initially show as tooltips.")
             imgui.text("Press enter to interact with the results.")
 
+            changed, cfg.search_allow_duplicates = imgui.checkbox("Allow Duplicates in Search", cfg.search_allow_duplicates)
             changed, cfg.max_search_results = imgui.slider_int("Max Results", cfg.max_search_results, 1, 1000)
             changed, cfg.default_node_search_name = imgui.input_text("Node Search (Name, ID, or Index)", cfg.default_node_search_name)
             local search_by_name_active = imgui.is_item_active()
 
+            --------------------------------------------------
+            ---------------- NODE SEARCH----------------------
+            --------------------------------------------------
             if changed then
+                last_search_results_set = {}
                 last_search_results_node = {}
                 last_search_results_action = {}
                 last_search_results_condition = {}
@@ -2075,8 +2082,15 @@ local function draw_stupid_editor(name)
                         local node = tree:get_node(i)
 
                         if node then
-                            display_node(tree, node)
-                            table.insert(last_search_results_node, node)
+
+                            if not cfg.search_allow_duplicates then
+                                if not last_search_results_set[get_node_full_name(node)] then
+                                    table.insert(last_search_results_node, node)
+                                    last_search_results_set[get_node_full_name(node)] = true
+                                end
+                            else
+                                table.insert(last_search_results_node, node)
+                            end
                         end
 
                         if not already_set then
@@ -2092,10 +2106,14 @@ local function draw_stupid_editor(name)
                 end
             end
 
+            --------------------------------------------------
+            ---------------- CONDITION SEARCH-----------------
+            --------------------------------------------------
             changed, cfg.default_condition_search_name = imgui.input_text("Condition Search (Name, Index)", cfg.default_condition_search_name)
             search_by_name_active = search_by_name_active or imgui.is_item_active()
 
             if changed then
+                last_search_results_set = {}
                 last_search_results_node = {}
                 last_search_results_action = {}
                 last_search_results_condition = {}
@@ -2109,7 +2127,14 @@ local function draw_stupid_editor(name)
                         local search_name = cfg.default_condition_search_name:lower()
 
                         if name:find(search_name) or search_name == tostring(i) then
-                            table.insert(last_search_results_condition, { ["i"] = real_index, cond = condition })
+                            if not cfg.search_allow_duplicates then
+                                if last_search_results_set[name] == nil then
+                                    table.insert(last_search_results_condition, { ["i"] = real_index, cond = condition })
+                                    last_search_results_set[name] = true
+                                end
+                            else
+                                table.insert(last_search_results_condition, { ["i"] = real_index, cond = condition })
+                            end
 
                             -- Limit the search results to 200 and break out early
                             if #last_search_results_condition > cfg.max_search_results then
@@ -2127,7 +2152,14 @@ local function draw_stupid_editor(name)
                         local search_name = cfg.default_condition_search_name:lower()
 
                         if name:find(search_name) or search_name == tostring(i) then
-                            table.insert(last_search_results_condition, { ["i"] = i, cond = condition })
+                            if not cfg.search_allow_duplicates then
+                                if last_search_results_set[name] == nil then
+                                    table.insert(last_search_results_condition, { ["i"] = i, cond = condition })
+                                    last_search_results_set[name] = true
+                                end
+                            else
+                                table.insert(last_search_results_condition, { ["i"] = i, cond = condition })
+                            end
 
                             -- Limit the search results to 200 and break out early
                             if #last_search_results_condition > cfg.max_search_results then
@@ -2138,10 +2170,14 @@ local function draw_stupid_editor(name)
                 end
             end
 
+            --------------------------------------------------
+            ---------------- ACTION SEARCH--------------------
+            --------------------------------------------------
             changed, cfg.default_action_search_name = imgui.input_text("Action Search (Name, Index)", cfg.default_action_search_name)
             search_by_name_active = search_by_name_active or imgui.is_item_active()
 
             if changed then
+                last_search_results_set = {}
                 last_search_results_node = {}
                 last_search_results_action = {}
                 last_search_results_condition = {}
@@ -2155,8 +2191,14 @@ local function draw_stupid_editor(name)
                         local search_name = cfg.default_action_search_name:lower()
 
                         if name:find(search_name) or search_name == tostring(i) then
-                            display_action(tree, nil, nil, action:get_type_definition():get_full_name(), action)
-                            table.insert(last_search_results_action, { ["i"] = real_index, act = action })
+                            if not cfg.search_allow_duplicates then
+                                if last_search_results_set[name] == nil then
+                                    table.insert(last_search_results_action, { ["i"] = real_index, act = action })
+                                    last_search_results_set[name] = true
+                                end
+                            else
+                                table.insert(last_search_results_action, { ["i"] = real_index, act = action })
+                            end
 
                             -- Limit the search results to 200 and break out early
                             if #last_search_results_action > cfg.max_search_results then
@@ -2174,8 +2216,14 @@ local function draw_stupid_editor(name)
                         local search_name = cfg.default_action_search_name:lower()
 
                         if name:find(search_name) or search_name == tostring(i) then
-                            display_action(tree, i, nil, action:get_type_definition():get_full_name(), action)
-                            table.insert(last_search_results_action, { ["i"] = i, act = action })
+                            if not cfg.search_allow_duplicates then
+                                if last_search_results_set[name] == nil then
+                                    table.insert(last_search_results_action, { ["i"] = i, act = action })
+                                    last_search_results_set[name] = true
+                                end
+                            else
+                                table.insert(last_search_results_action, { ["i"] = i, act = action })
+                            end
 
                             -- Limit the search results to 200 and break out early
                             if #last_search_results_action > cfg.max_search_results then
@@ -2186,7 +2234,9 @@ local function draw_stupid_editor(name)
                 end
             end
 
-
+            --------------------------------------------------
+            ---------------- SEARCH RESULTS ------------------
+            --------------------------------------------------
             if imgui.is_key_pressed(ENTER) then
                 imgui.open_popup("Search_Results_Name")
             elseif not imgui.is_popup_open("Search_Results_Name") and search_by_name_active then
