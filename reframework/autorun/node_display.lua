@@ -452,13 +452,13 @@ local function display_condition(tree, i, node, name, cond)
                             prev_args = args
                         end,
                         function(retval)
-                            local old_retval = sdk.to_int64(retval)
+                            local old_retval = (sdk.to_int64(retval) & 1) == 1
                             local new_retval = 
                                 custom_condition_evaluators[cond].eval()(
                                     custom_condition_evaluators[cond].storage,
                                     sdk.to_managed_object(prev_args[2]), 
                                     sdk.to_managed_object(prev_args[3]), 
-                                    retval
+                                    old_retval
                                 )
 
                             --[[if sdk.to_int64(new_retval) ~= old_retval then
@@ -471,7 +471,7 @@ local function display_condition(tree, i, node, name, cond)
                                 end
                             end]]
 
-                            return new_retval
+                            return sdk.to_ptr(new_retval)
                         end
                     )
                 end
