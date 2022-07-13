@@ -1,5 +1,7 @@
 # RE Engine Behavior Tree Editor
 
+https://cursey.github.io/reframework-book/bhvt_editor/bhvt_editor.html
+
 ## Examples
 
 ### The UI
