@@ -2088,6 +2088,361 @@ local last_search_results_condition = {}
 local last_search_results_action = {}
 local last_search_results_set = {} -- to prevent duplicates in the search (optional)
 
+local field_write_handlers = {
+    ["via.vec3"] = function(field)
+        return { field.x, field.y, field.z }
+    end,
+    ["via.vec2"] = function(field)
+        return { field.x, field.y }
+    end,
+    ["via.vec4"] = function(field)
+        return { field.x, field.y, field.z, field.w }
+    end,
+    ["System.Guid"] = function(field)
+        local out_bytes = {}
+
+        for i=1, 4 do
+            table.insert(out_bytes, field:read_dword((i - 1) * 4))
+        end
+
+        return out_bytes
+    end
+}
+
+local function get_field_write_handler(field)
+    local handler = field_write_handlers[field]
+
+    if handler ~= nil then
+        return handler
+    end
+
+    return function(field)
+        return field
+    end
+end
+
+local field_read_handlers = {
+    ["via.vec3"] = function(json_field)
+        return Vector3f.new(json_field[1], json_field[2], json_field[3])
+    end,
+    ["via.vec2"] = function(json_field)
+        return Vector2f.new(json_field[1], json_field[2])
+    end,
+    ["via.vec4"] = function(json_field)
+        return Vector4f.new(json_field[1], json_field[2], json_field[3], json_field[4])
+    end,
+    ["System.Guid"] = function(json_field)
+        local guid = ValueType.new(sdk.find_type_definition("System.Guid"))
+        guid:write_dword(0, json_field[1])
+        guid:write_dword(4, json_field[2])
+        guid:write_dword(8, json_field[3])
+        guid:write_dword(12, json_field[4])
+
+        return guid
+    end
+}
+
+local function get_field_read_handler(field)
+    local handler = field_read_handlers[field]
+
+    if handler ~= nil then
+        return handler
+    end
+
+    local decimal_types = {
+        f64 = true,
+        f32 = true,
+        ["System.Single"] = true,
+        ["System.Double"] = true,
+    }
+
+    if not decimal_types[field] then
+        return function(json_field)
+            if type(json_field) == "string" or type(json_field) == "boolean" then
+                return json_field 
+            else
+                return math.floor(json_field) 
+            end
+        end
+    end
+
+    return function(json_field) 
+        return json_field 
+    end
+end
+
+local filename = "bhvteditor/saved_tree.json" -- TODO: CHANGE THIS
+
+local function save_tree(tree)
+    local out = {
+        tree_data = {
+            action_methods = {},
+            static_action_methods = {},
+            static_actions = {},
+            static_conditions = {},
+        },
+        actions = {},
+        conditions = {},
+    }
+
+    for i, v in pairs(tree:get_data():get_action_methods()) do
+        table.insert(out.tree_data.action_methods, v)
+    end
+
+    for i, v in pairs(tree:get_data():get_static_action_methods()) do
+        table.insert(out.tree_data.static_action_methods, v)
+    end
+
+    local make_fields = function(obj, t, out)
+        local fields = t:get_fields()
+
+        for i, field_desc in ipairs(fields) do
+            local field_t = field_desc:get_type()
+
+            if field_t:is_value_type() then
+                local field_name = field_desc:get_name()
+                local field_value = field_desc:get_data(obj)
+
+                out[field_name] = get_field_write_handler(field_t:get_full_name())(field_value)
+            end
+        end
+    end
+
+    local make_properties = function(obj, t, out)
+        local methods = t:get_methods()
+
+        for i, method in ipairs(methods) do
+            if method:get_name():find("get_") == 1 then -- start of string
+                local method_t = method:get_return_type()
+                local isolated_name = method:get_name():sub(5)
+                local value = method:call(obj)
+
+                out[isolated_name] = get_field_write_handler(method_t:get_full_name())(value)
+            end
+        end
+    end
+
+    for i=0, tree:get_action_count() do
+        local action = tree:get_action(i)
+
+        if action ~= nil then
+            local action_tbl = {}
+
+            action_tbl.type = action:get_type_definition():get_full_name()
+            action_tbl.fields = {}
+            action_tbl.properties = {}
+            
+            local t = action:get_type_definition()
+
+            while t ~= nil do
+                make_fields(action, t, action_tbl.fields)
+                make_properties(action, t, action_tbl.properties)
+
+                t = t:get_parent_type()
+            end
+
+            table.insert(out.actions, action_tbl)
+        else
+            table.insert(out.actions, {})
+        end
+    end
+
+    for i=0, tree:get_static_action_count() do
+        local action = tree:get_action(i | (1 << 30))
+
+        if action ~= nil then
+            local action_tbl = {}
+
+            action_tbl.type = action:get_type_definition():get_full_name()
+            action_tbl.fields = {}
+            action_tbl.properties = {}
+            
+            local t = action:get_type_definition()
+
+            while t ~= nil do
+                make_fields(action, t, action_tbl.fields)
+                make_properties(action, t, action_tbl.properties)
+
+                t = t:get_parent_type()
+            end
+
+            table.insert(out.tree_data.static_actions, action_tbl)
+        else
+            table.insert(out.tree_data.static_actions, {})
+        end
+    end
+
+    for i=0, tree:get_condition_count() do
+        local condition = tree:get_condition(i)
+
+        if condition ~= nil then
+            local condition_tbl = {}
+
+            condition_tbl.type = condition:get_type_definition():get_full_name()
+            condition_tbl.fields = {}
+            condition_tbl.properties = {}
+            
+            local t = condition:get_type_definition()
+
+            while t ~= nil do
+                make_fields(condition, t, condition_tbl.fields)
+                make_properties(condition, t, condition_tbl.properties)
+
+                t = t:get_parent_type()
+            end
+
+            table.insert(out.conditions, condition_tbl)
+        else
+            table.insert(out.conditions, {})
+        end
+    end
+
+    for i=0, tree:get_static_condition_count() do
+        local static_condition = tree:get_condition(i | (1 << 30))
+
+        if static_condition ~= nil then
+            local static_condition_tbl = {}
+
+            static_condition_tbl.type = static_condition:get_type_definition():get_full_name()
+            static_condition_tbl.fields = {}
+            static_condition_tbl.properties = {}
+            
+            local t = static_condition:get_type_definition()
+
+            while t ~= nil do
+                make_fields(static_condition, t, static_condition_tbl.fields)
+                make_properties(static_condition, t, static_condition_tbl.properties)
+
+                t = t:get_parent_type()
+            end
+
+            table.insert(out.tree_data.static_conditions, static_condition_tbl)
+        else
+            table.insert(out.tree_data.static_conditions, {})
+        end
+    end
+
+    json.dump_file(filename, out)
+end
+
+local function load_tree(tree) -- tree is being written to in this instance.
+    first_times = {}
+
+    local loaded_tree = json.load_file(filename)
+
+    if loaded_tree == nil then
+        log.error("Could not load saved tree")
+        return
+    end
+
+    local assign_fields = function(obj, t, fields)
+        if fields == nil then return end
+
+        for field_name, data in pairs(fields) do
+            local field_t = t:get_field(field_name):get_type()
+            obj[field_name] = get_field_read_handler(field_t:get_full_name())(data)
+        end
+    end
+
+    local assign_properties = function(obj, t, properties)
+        if properties == nil then return end
+
+        for property_name, data in pairs(properties) do
+            local getter = t:get_method("get_" .. property_name)
+            local setter = t:get_method("set_" .. property_name)
+
+            if setter ~= nil then
+                setter:call(obj, get_field_read_handler(getter:get_return_type():get_full_name())(data))
+            else
+                log.debug("Could not find setter for property " .. property_name)
+            end
+        end
+    end
+
+    local increase_array_size = function(metaname, json_objects, tree_objects)
+        if json_objects == nil then
+            log.error("Saved tree has no " .. metaname .. " objects")
+            return false
+        end
+    
+        log.debug("File has " .. tostring(#json_objects) .. " " .. metaname .. " objects")
+    
+        -- Resize the objects array (actions, conditions, etc) to match the loaded tree.
+        if tree_objects:size() < #json_objects then
+            log.debug("Saved tree has more " .. metaname .. " objects than the current tree. Expanding tree...")
+    
+            for i=tree_objects:size(), #json_objects-1 do
+                tree_objects:emplace()
+            end
+        end
+
+        return true
+    end
+
+    local load_objects = function(metaname, json_objects, tree_objects)
+        -- Resize the objects array (actions, conditions, etc) to match the loaded tree.
+        if not increase_array_size(metaname, json_objects, tree_objects) then
+            return
+        end
+
+        local num_matching = 0
+        
+        for i, object_tbl in ipairs(json_objects) do
+            --log.debug(tostring(i) .. ": " .. tostring(object_tbl.type))
+
+            local current_object = tree_objects[i-1]
+            local new_object = nil
+            
+            if current_object == nil then
+                new_object = sdk.create_instance(object_tbl.type):add_ref_permanent()
+            else
+                if current_object:get_type_definition():get_full_name() == object_tbl.type then
+                    -- Not necessary to create a new object, so we just re-use the old one.
+                    new_object = current_object
+                    num_matching = num_matching + 1
+                    --log.debug("Re-using existing object " .. tostring(i) .. ": " .. tostring(object_tbl.type))
+                else
+                    new_object = sdk.create_instance(object_tbl.type):add_ref_permanent()
+                end
+            end
+
+            if new_object ~= current_object then
+                log.debug("Creating new object " .. tostring(i) .. ": " .. tostring(object_tbl.type))
+            end
+
+            local t = new_object:get_type_definition()
+    
+            assign_fields(new_object, t, object_tbl.fields)
+            assign_properties(new_object, t, object_tbl.properties)
+    
+            if new_object ~= current_object then
+                tree_objects[i-1] = new_object
+            end
+        end
+
+        log.debug("File has " .. tostring(num_matching) .. " " .. metaname .. " objects that already match the current tree")
+    end
+
+    local load_integers = function(metaname, json_integers, tree_integers)
+        -- Resize the integers array (actions, conditions, etc) to match the loaded tree.
+        if not increase_array_size(metaname, json_integers, tree_integers) then
+            return
+        end
+    
+        for i, integer in ipairs(json_integers) do
+            tree_integers[i-1] = integer
+        end
+    end
+
+    load_objects("action", loaded_tree.actions, tree:get_actions())
+    load_objects("condition", loaded_tree.conditions, tree:get_conditions())
+    load_objects("static action", loaded_tree.tree_data.static_actions, tree:get_data():get_static_actions())
+    load_objects("static condition", loaded_tree.tree_data.static_conditions, tree:get_data():get_static_conditions())
+
+    load_integers("action method", loaded_tree.tree_data.action_methods, tree:get_data():get_action_methods())
+    load_integers("static action method", loaded_tree.tree_data.static_action_methods, tree:get_data():get_static_action_methods())
+end
+
 local function draw_stupid_editor(name)
     if cfg.graph_closes_with_reframework then
         if not reframework:is_drawing_ui() then return end
@@ -2124,7 +2479,15 @@ local function draw_stupid_editor(name)
 
     if imgui.begin_menu_bar() then
         if imgui.begin_menu("File") then
-            imgui.text("This literally does nothing.")
+            if imgui.button("Save") then
+                save_tree(tree)
+            end
+
+            if imgui.button("Load") then
+                load_tree(tree)
+            end
+
+            --imgui.text("This literally does nothing.")
 
             imgui.end_menu()
         end
