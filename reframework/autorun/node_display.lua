@@ -3056,7 +3056,7 @@ local function draw_stupid_editor(name)
         -- Display node
         imgui.separator()
         imgui.push_item_width(100)
-        changed, cfg.default_node = imgui.slider_int("Display Node", cfg.default_node, 0, #custom_tree)
+        changed, cfg.default_node = imgui.drag_int("Display Node", cfg.default_node, 0, #custom_tree)
         if changed and tree ~= nil and cfg.default_node < tree:get_node_count() then
             queued_editor_id_move = {["i"] = cfg.default_node, ["id"] = tree:get_node(cfg.default_node):get_id()}
         end
