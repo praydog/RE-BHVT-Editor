@@ -2171,9 +2171,9 @@ local function get_field_read_handler(field)
     end
 end
 
-local filename = "bhvteditor/saved_tree.json" -- TODO: CHANGE THIS
+local function save_tree(tree, filename)
+    if not filename then filename = "bhvteditor/saved_tree.json" end
 
-local function save_tree(tree)
     local out = {
         tree_data = {
             action_methods = {},
@@ -2426,7 +2426,8 @@ local function save_tree(tree)
     json.dump_file(filename, out)
 end
 
-local function load_tree(tree) -- tree is being written to in this instance.
+local function load_tree(tree, filename) -- tree is being written to in this instance.
+    if not filename then filename = "bhvteditor/saved_tree.json" end
     first_times = {}
 
     local loaded_tree = json.load_file(filename)
@@ -2474,6 +2475,12 @@ local function load_tree(tree) -- tree is being written to in this instance.
     
             for i=tree_objects:size(), #json_objects-1 do
                 tree_objects:emplace()
+            end
+        elseif #json_objects < tree_objects:size() then
+            log.debug("Saved tree has less " .. metaname .. " objects than the current tree. Shrinking tree...")
+    
+            for i=#json_objects+1, tree_objects:size() do
+                tree_objects:pop_back()
             end
         end
 
@@ -2551,10 +2558,16 @@ local function load_tree(tree) -- tree is being written to in this instance.
 
         -- Resize the objects array (actions, conditions, etc) to match the loaded tree.
         if tree_objects:size() < #json_objects then
-            log.debug("Node " .. node_name .. " has more " .. metaname .. " objects than the current node. Expanding node...")
+            log.debug("Saved Node " .. node_name .. " has more " .. metaname .. " objects than the current node. Expanding node...")
     
             for i=tree_objects:size(), #json_objects-1 do
                 tree_objects:emplace()
+            end
+        elseif #json_objects < tree_objects:size() then
+            log.debug("Saved Node " .. node_name .. " has fewer " .. metaname .. " objects than the current node. Shrinking node...")
+    
+            for i=#json_objects+1, tree_objects:size() do
+                tree_objects:pop_back()
             end
         end
 
@@ -2581,7 +2594,10 @@ local function load_tree(tree) -- tree is being written to in this instance.
     tbl.transition_attributes = {}
     tbl.transition_events = {}]]
     
-    
+    if #loaded_tree.nodes ~= tree:get_node_count() then
+        log.debug("Saved tree has " .. tostring(#loaded_tree.nodes) .. " nodes, but the current tree has " .. tostring(tree:get_node_count()) .. " nodes. Node resizing is not yet supported.")
+    end
+
     for i, node_json in ipairs(loaded_tree.nodes) do
         local tree_node = tree:get_node(i-1)
         local node_name = tostring(i-1) .. ": " .. node_json.name
@@ -2597,7 +2613,7 @@ local function load_tree(tree) -- tree is being written to in this instance.
             for j, json_evts in ipairs(node_json.transition_events) do
                 local tree_evts = tree_node:get_data():get_transition_events()[j-1]
 
-                if type(tree_evts) == "table" then
+                if type(json_evts) == "table" then
                     increase_node_array_size(node_name, "node transition event element", json_evts, tree_evts)
 
                     for k, evt in ipairs(json_evts) do
@@ -2608,6 +2624,8 @@ local function load_tree(tree) -- tree is being written to in this instance.
         end
     end
 end
+
+local popup_ask_filename = "my_cool_tree"
 
 local function draw_stupid_editor(name)
     if cfg.graph_closes_with_reframework then
@@ -2645,12 +2663,45 @@ local function draw_stupid_editor(name)
 
     if imgui.begin_menu_bar() then
         if imgui.begin_menu("File") then
-            if imgui.button("Save") then
-                save_tree(tree)
+            if imgui.begin_menu("Save") then
+                if imgui.button("New File") then
+                    imgui.open_popup("NewFile_AskName")
+                    --save_tree(tree)
+                end
+
+                if imgui.begin_popup("NewFile_AskName") then
+                    imgui.text("Files get saved to bhvteditor/{your_name}_saved_tree.json")
+                    changed, popup_ask_filename = imgui.input_text("Name", popup_ask_filename)
+                    if imgui.button("Save") then
+                        save_tree(tree, "bhvteditor/" .. popup_ask_filename .. "_saved_tree.json")
+                        imgui.close_current_popup()
+                    end
+                    imgui.end_popup()
+                end
+
+                -- Glob the files in the current directory.
+                local files = fs.glob("bhvteditor.*saved_tree.*json")
+
+                for k, file in pairs(files) do
+                    if imgui.button(file) then
+                        save_tree(tree, file)
+                    end
+                end
+
+                imgui.end_menu()
             end
 
-            if imgui.button("Load") then
-                load_tree(tree)
+            if imgui.begin_menu("Load") then
+                -- Glob the files in the current directory.
+                local files = fs.glob("bhvteditor.*saved_tree.*json")
+
+                for k, file in pairs(files) do
+                    if imgui.button(file) then
+                        load_tree(tree, file)
+                    end
+                end
+
+                imgui.end_menu()
             end
 
             --imgui.text("This literally does nothing.")
@@ -2936,7 +2987,9 @@ local function draw_stupid_editor(name)
         imgui.end_menu_bar()
     end
 
-    if (tree ~= nil and (active_tree == nil or tree:as_memoryview():address() ~= active_tree:as_memoryview():address())) then
+    if (tree ~= nil and (active_tree == nil or tree ~= active_tree)) then
+        log.debug("Recreating active tree")
+
         custom_tree = {}
         updated_tree = true
         active_tree = tree        
