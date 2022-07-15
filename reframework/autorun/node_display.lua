@@ -121,9 +121,17 @@ local function duplicate_managed_object_in_array(arr, i)
 
     while td ~= nil do
         for i, getter in ipairs(td:get_methods()) do
-            if getter:get_name():find("get_") == 1 then -- start of string
-                local isolated_name = getter:get_name():sub(5)
-                local setter = td:get_method("set_" .. isolated_name)
+            local name_start = 5
+
+            local is_potential_getter = getter:get_num_params() == 0 and getter:get_name():find("get") == 1
+
+            if is_potential_getter and not getter:get_name():find("get_") and getter:get_name():find("get") == 1 then
+                name_start = 4
+            end
+
+            if is_potential_getter then -- start of string
+                local isolated_name = getter:get_name():sub(name_start)
+                local setter = td:get_method("set_" .. isolated_name) or td:get_method("set" .. isolated_name)
 
                 if setter then
                     log.info("[Dupe] Setting " .. tostring(isolated_name))
@@ -264,13 +272,15 @@ local last_player = nil
 local function get_sorted_nodes(tree)
     local out = {}
 
-    if sort_dict[tree] ~= nil then
+    if sort_dict[tree] ~= nil and tree:get_node_count() == #sort_dict[tree] then
         local res = sort_dict[tree]
 
         if res ~= nil then
             return res
         end
     end
+
+    log.debug("Sorting nodes for tree " .. string.format("%x", tree:as_memoryview():address()))
 
     for j=0, tree:get_node_count() do
         local node = tree:get_node(j)
@@ -1226,7 +1236,6 @@ local function cache_tree(core, tree)
 
     --if now - last_action_update_time > 0.5 then
     if first_times[tree] == nil then
-        first_times[tree] = true
         action_map[tree] = {}
         action_name_map[tree] = {}
         event_map[tree] = {}
@@ -1280,6 +1289,7 @@ local function cache_tree(core, tree)
         end
 
         last_action_update_time = os.clock()
+        first_times[tree] = true
     end
 end
 
@@ -1921,7 +1931,12 @@ draw_node = function(i, seen)
     local custom_id = nil
 
     if active_tree ~= nil then
-        custom_id = active_tree:get_node(i):get_id()
+        local node = active_tree:get_node(i)
+        if node == nil then
+            return
+        end
+
+        custom_id = node:get_id()
     end
 
     local node_descriptor = custom_tree[i]
@@ -2284,16 +2299,36 @@ local function save_tree(tree, filename)
         end
     end
 
-    local make_properties = function(obj, t, out)
+    local bad_props = {}
+
+    local make_properties = function(obj, t, out) 
         local methods = t:get_methods()
 
         for i, method in ipairs(methods) do
-            if method:get_name():find("get_") == 1 then -- start of string
-                local method_t = method:get_return_type()
-                local isolated_name = method:get_name():sub(5)
-                local value = method:call(obj)
+            local name_start = 5
+            local is_potential_getter = method:get_num_params() == 0 and method:get_name():find("get") == 1
 
-                out[isolated_name] = get_field_write_handler(method_t:get_full_name())(value)
+            if is_potential_getter and not method:get_name():find("get_") and method:get_name():find("get") == 1 then
+                name_start = 4
+            end
+
+            if is_potential_getter then -- start of string
+                local method_t = method:get_return_type()
+                local isolated_name = method:get_name():sub(name_start)
+
+                local setter = t:get_method("set_" .. isolated_name) or t:get_method("set" .. isolated_name)
+
+                -- Don't output meaningless properties
+                if setter ~= nil then
+                    local value = method:call(obj)
+                    out[isolated_name] = get_field_write_handler(method_t:get_full_name())(value)
+                else
+                    if not bad_props[isolated_name] then
+                        log.debug("Skipping property " .. isolated_name .. " because it has no setter")
+                    end
+
+                    bad_props[isolated_name] = true
+                end
             end
         end
     end
@@ -2437,12 +2472,25 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
         return
     end
 
+    if #loaded_tree.nodes ~= tree:get_node_count() then
+        re.msg("Saved tree has different number of nodes than current tree.\nResizing of nodes is not yet supported.\nBugs may occur")
+    end
+
     local assign_fields = function(obj, t, fields)
         if fields == nil then return end
 
         for field_name, data in pairs(fields) do
             local field_t = t:get_field(field_name):get_type()
-            obj[field_name] = get_field_read_handler(field_t:get_full_name())(data)
+
+            local new_field = get_field_read_handler(field_t:get_full_name())(data)
+
+            if type(new_field) == "boolean" or type(new_field) == "number" or type(new_field) == "string" then
+                if obj[field_name] ~= new_field then
+                    log.debug("Field " .. field_name .. " does not match, assigning new value")
+                end
+            end
+
+            obj[field_name] = new_field
         end
     end
 
@@ -2450,13 +2498,26 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
         if properties == nil then return end
 
         for property_name, data in pairs(properties) do
-            local getter = t:get_method("get_" .. property_name)
-            local setter = t:get_method("set_" .. property_name)
+            local getter = t:get_method("get_" .. property_name) or t:get_method("get" .. property_name)
+            local setter = t:get_method("set_" .. property_name) or t:get_method("set" .. property_name)
 
             if setter ~= nil then
+                local current_value = getter:call(obj)
+                local new_value = get_field_read_handler(getter:get_return_type():get_full_name())(data)
+
+                if type(current_value) == "boolean" or type(current_value) == "number" or type(current_value) == "string" then
+                    if current_value ~= new_value then
+                        log.debug("Property " .. property_name .. " does not match, assigning new value")
+                    end
+                end
+
                 setter:call(obj, get_field_read_handler(getter:get_return_type():get_full_name())(data))
             else
-                log.debug("Could not find setter for property " .. property_name)
+                if t:get_namespace() == "via." then -- native type, all C# types have fields so don't log anything.
+                    log.debug("Could not find setter for property " .. property_name)
+                else
+                    log.debug("Stinky property " .. property_name .. " in " .. t:get_full_name())
+                end
             end
         end
     end
@@ -2546,6 +2607,7 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
     load_objects("condition", loaded_tree.conditions, tree:get_conditions())
     load_objects("static action", loaded_tree.tree_data.static_actions, tree:get_data():get_static_actions())
     load_objects("static condition", loaded_tree.tree_data.static_conditions, tree:get_data():get_static_conditions())
+    load_objects("transition event", loaded_tree.transition_events, tree:get_transitions())
 
     load_integers("action method", loaded_tree.tree_data.action_methods, tree:get_data():get_action_methods())
     load_integers("static action method", loaded_tree.tree_data.static_action_methods, tree:get_data():get_static_action_methods())
@@ -2601,20 +2663,20 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
     for i, node_json in ipairs(loaded_tree.nodes) do
         local tree_node = tree:get_node(i-1)
         local node_name = tostring(i-1) .. ": " .. node_json.name
-        load_node_integers(node_name, "node action", node_json.actions, tree_node:get_data():get_actions())
-        load_node_integers(node_name, "node transition condition", node_json.transition_conditions, tree_node:get_data():get_transition_conditions())
-        load_node_integers(node_name, "node state", node_json.states, tree_node:get_data():get_states())
-        load_node_integers(node_name, "node state 2", node_json.states_2, tree_node:get_data():get_states_2())
-        load_node_integers(node_name, "node start state", node_json.start_states, tree_node:get_data():get_start_states())
-        load_node_integers(node_name, "node transition id", node_json.transition_ids, tree_node:get_data():get_transition_ids())
-        load_node_integers(node_name, "node transition attribute", node_json.transition_attributes, tree_node:get_data():get_transition_attributes())
+        load_node_integers(node_name, "action", node_json.actions, tree_node:get_data():get_actions())
+        load_node_integers(node_name, "transition condition", node_json.transition_conditions, tree_node:get_data():get_transition_conditions())
+        load_node_integers(node_name, "state", node_json.states, tree_node:get_data():get_states())
+        load_node_integers(node_name, "state 2", node_json.states_2, tree_node:get_data():get_states_2())
+        load_node_integers(node_name, "start state", node_json.start_states, tree_node:get_data():get_start_states())
+        load_node_integers(node_name, "transition id", node_json.transition_ids, tree_node:get_data():get_transition_ids())
+        load_node_integers(node_name, "transition attribute", node_json.transition_attributes, tree_node:get_data():get_transition_attributes())
 
-        if increase_node_array_size(node_name, "node transition event", node_json.transition_events, tree_node:get_data():get_transition_events()) then
+        if increase_node_array_size(node_name, "transition event", node_json.transition_events, tree_node:get_data():get_transition_events()) then
             for j, json_evts in ipairs(node_json.transition_events) do
                 local tree_evts = tree_node:get_data():get_transition_events()[j-1]
 
                 if type(json_evts) == "table" then
-                    increase_node_array_size(node_name, "node transition event element", json_evts, tree_evts)
+                    increase_node_array_size(node_name, "transition event element", json_evts, tree_evts)
 
                     for k, evt in ipairs(json_evts) do
                         tree_evts[k-1] = evt
@@ -2626,6 +2688,7 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
 end
 
 local popup_ask_filename = "my_cool_tree"
+local ask_overwrite_filename = ""
 
 local function draw_stupid_editor(name)
     if cfg.graph_closes_with_reframework then
@@ -2653,6 +2716,8 @@ local function draw_stupid_editor(name)
                 tree = layer:get_tree_object()
 
                 if tree ~= nil then
+                    last_layer = layer
+                    cache_tree(layer, tree)
                 end
             end
         end
@@ -2663,10 +2728,9 @@ local function draw_stupid_editor(name)
 
     if imgui.begin_menu_bar() then
         if imgui.begin_menu("File") then
-            if imgui.begin_menu("Save") then
+            if imgui.begin_menu("Save                        ") then
                 if imgui.button("New File") then
                     imgui.open_popup("NewFile_AskName")
-                    --save_tree(tree)
                 end
 
                 if imgui.begin_popup("NewFile_AskName") then
@@ -2683,19 +2747,36 @@ local function draw_stupid_editor(name)
                 local files = fs.glob("bhvteditor.*saved_tree.*json")
 
                 for k, file in pairs(files) do
+                    imgui.text("Overwrite")
+                    imgui.same_line()
                     if imgui.button(file) then
-                        save_tree(tree, file)
+                        imgui.open_popup("Overwrite_Ask")
+                        ask_overwrite_filename = file
                     end
+                end
+
+                if imgui.begin_popup("Overwrite_Ask") then
+                    imgui.text("Are you sure you want to overwrite " .. ask_overwrite_filename .. "?")
+                    if imgui.button("Yes") then
+                        save_tree(tree, ask_overwrite_filename)
+                        imgui.close_current_popup()
+                    end
+                    if imgui.button("No") then
+                        imgui.close_current_popup()
+                    end
+                    imgui.end_popup()
                 end
 
                 imgui.end_menu()
             end
 
-            if imgui.begin_menu("Load") then
+            if imgui.begin_menu("Load                        ") then
                 -- Glob the files in the current directory.
                 local files = fs.glob("bhvteditor.*saved_tree.*json")
 
                 for k, file in pairs(files) do
+                    imgui.text("Load")
+                    imgui.same_line()
                     if imgui.button(file) then
                         load_tree(tree, file)
                     end
@@ -3013,11 +3094,6 @@ local function draw_stupid_editor(name)
                 custom_tree[i] = insertion
             end
         end
-    end
-
-    if layer ~= nil and tree ~= nil then
-        last_layer = layer
-        cache_tree(layer, tree)
     end
 
     if cfg.show_side_panels then
