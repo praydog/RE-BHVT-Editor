@@ -2183,7 +2183,83 @@ local function save_tree(tree)
         },
         actions = {},
         conditions = {},
+        nodes = {},
+        transition_events = {}
     }
+
+    local make_node = function(node)
+        local tbl = {}
+
+        local node_actions = node:get_data():get_actions()
+        local node_transition_conditions = node:get_data():get_transition_conditions()
+        local node_states = node:get_data():get_states()
+        local node_states_2 = node:get_data():get_states_2()
+        local node_start_states = node:get_data():get_start_states()
+        local node_transition_ids = node:get_data():get_transition_ids()
+        local node_transition_attributes = node:get_data():get_transition_attributes()
+        local node_transition_events = node:get_data():get_transition_events()
+
+        tbl.actions = {}
+        tbl.transition_conditions = {}
+        tbl.states = {}
+        tbl.states_2 = {}
+        tbl.start_states = {}
+        tbl.transition_ids = {}
+        tbl.transition_attributes = {}
+        tbl.transition_events = {}
+        tbl.name = get_node_full_name(node)
+
+        for i=0, node_actions:size()-1 do
+            table.insert(tbl.actions, node_actions[i])
+        end
+
+        for i=0, node_transition_conditions:size()-1 do
+            table.insert(tbl.transition_conditions, node_transition_conditions[i])
+        end
+
+        for i=0, node_states:size()-1 do
+            table.insert(tbl.states, node_states[i])
+        end
+
+        for i=0, node_states_2:size()-1 do
+            table.insert(tbl.states_2, node_states_2[i])
+        end
+
+        for i=0, node_start_states:size()-1 do
+            table.insert(tbl.start_states, node_start_states[i])
+        end
+
+        for i=0, node_transition_ids:size()-1 do
+            table.insert(tbl.transition_ids, node_transition_ids[i])
+        end
+
+        for i=0, node_transition_attributes:size() - 1 do
+            table.insert(tbl.transition_attributes, node_transition_attributes[i])
+        end
+
+        for i=0, node_transition_events:size() - 1 do
+            local evts = node_transition_events[i]
+            local new_tbl = {}
+
+            for j=0, evts:size()-1 do
+                table.insert(new_tbl, evts[j])
+            end
+
+            if #new_tbl == 0 then
+                table.insert(tbl.transition_events, "NULL")
+            else
+                table.insert(tbl.transition_events, new_tbl)
+            end
+        end
+
+        return tbl
+    end
+
+    for i=0, tree:get_node_count()-1 do
+        local node = tree:get_node(i)
+
+        table.insert(out.nodes, make_node(node))
+    end
 
     for i, v in pairs(tree:get_data():get_action_methods()) do
         table.insert(out.tree_data.action_methods, v)
@@ -2222,7 +2298,7 @@ local function save_tree(tree)
         end
     end
 
-    for i=0, tree:get_action_count() do
+    for i=0, tree:get_action_count()-1 do
         local action = tree:get_action(i)
 
         if action ~= nil then
@@ -2243,11 +2319,11 @@ local function save_tree(tree)
 
             table.insert(out.actions, action_tbl)
         else
-            table.insert(out.actions, {})
+            table.insert(out.actions, "NULL")
         end
     end
 
-    for i=0, tree:get_static_action_count() do
+    for i=0, tree:get_static_action_count()-1 do
         local action = tree:get_action(i | (1 << 30))
 
         if action ~= nil then
@@ -2268,11 +2344,11 @@ local function save_tree(tree)
 
             table.insert(out.tree_data.static_actions, action_tbl)
         else
-            table.insert(out.tree_data.static_actions, {})
+            table.insert(out.tree_data.static_actions, "NULL")
         end
     end
 
-    for i=0, tree:get_condition_count() do
+    for i=0, tree:get_condition_count()-1 do
         local condition = tree:get_condition(i)
 
         if condition ~= nil then
@@ -2293,11 +2369,11 @@ local function save_tree(tree)
 
             table.insert(out.conditions, condition_tbl)
         else
-            table.insert(out.conditions, {})
+            table.insert(out.conditions, "NULL")
         end
     end
 
-    for i=0, tree:get_static_condition_count() do
+    for i=0, tree:get_static_condition_count()-1 do
         local static_condition = tree:get_condition(i | (1 << 30))
 
         if static_condition ~= nil then
@@ -2318,7 +2394,32 @@ local function save_tree(tree)
 
             table.insert(out.tree_data.static_conditions, static_condition_tbl)
         else
-            table.insert(out.tree_data.static_conditions, {})
+            table.insert(out.tree_data.static_conditions, "NULL")
+        end
+    end
+
+    for i=0, tree:get_transition_count()-1 do
+        local transition_event = tree:get_transition(i)
+
+        if transition_event ~= nil then
+            local transition_event_tbl = {}
+
+            transition_event_tbl.type = transition_event:get_type_definition():get_full_name()
+            transition_event_tbl.fields = {}
+            transition_event_tbl.properties = {}
+            
+            local t = transition_event:get_type_definition()
+
+            while t ~= nil do
+                make_fields(transition_event, t, transition_event_tbl.fields)
+                make_properties(transition_event, t, transition_event_tbl.properties)
+
+                t = t:get_parent_type()
+            end
+
+            table.insert(out.transition_events, transition_event_tbl)
+        else
+            table.insert(out.transition_events, "NULL")
         end
     end
 
@@ -2441,6 +2542,71 @@ local function load_tree(tree) -- tree is being written to in this instance.
 
     load_integers("action method", loaded_tree.tree_data.action_methods, tree:get_data():get_action_methods())
     load_integers("static action method", loaded_tree.tree_data.static_action_methods, tree:get_data():get_static_action_methods())
+
+    local increase_node_array_size = function(node_name, metaname, json_objects, tree_objects)
+        if json_objects == nil then
+            return false
+        end
+    
+
+        -- Resize the objects array (actions, conditions, etc) to match the loaded tree.
+        if tree_objects:size() < #json_objects then
+            log.debug("Node " .. node_name .. " has more " .. metaname .. " objects than the current node. Expanding node...")
+    
+            for i=tree_objects:size(), #json_objects-1 do
+                tree_objects:emplace()
+            end
+        end
+
+        return true
+    end
+
+    local load_node_integers = function(node_name, metaname, json_integers, node_integers)
+        -- Resize the integers array (actions, conditions, etc) to match the loaded tree.
+        if not increase_node_array_size(node_name, metaname, json_integers, node_integers) then
+            return
+        end
+    
+        for i, integer in ipairs(json_integers) do
+            node_integers[i-1] = integer
+        end
+    end
+
+    --[[tbl.actions = {}
+    tbl.transition_conditions = {}
+    tbl.states = {}
+    tbl.states_2 = {}
+    tbl.start_states = {}
+    tbl.transition_ids = {}
+    tbl.transition_attributes = {}
+    tbl.transition_events = {}]]
+    
+    
+    for i, node_json in ipairs(loaded_tree.nodes) do
+        local tree_node = tree:get_node(i-1)
+        local node_name = tostring(i-1) .. ": " .. node_json.name
+        load_node_integers(node_name, "node action", node_json.actions, tree_node:get_data():get_actions())
+        load_node_integers(node_name, "node transition condition", node_json.transition_conditions, tree_node:get_data():get_transition_conditions())
+        load_node_integers(node_name, "node state", node_json.states, tree_node:get_data():get_states())
+        load_node_integers(node_name, "node state 2", node_json.states_2, tree_node:get_data():get_states_2())
+        load_node_integers(node_name, "node start state", node_json.start_states, tree_node:get_data():get_start_states())
+        load_node_integers(node_name, "node transition id", node_json.transition_ids, tree_node:get_data():get_transition_ids())
+        load_node_integers(node_name, "node transition attribute", node_json.transition_attributes, tree_node:get_data():get_transition_attributes())
+
+        if increase_node_array_size(node_name, "node transition event", node_json.transition_events, tree_node:get_data():get_transition_events()) then
+            for j, json_evts in ipairs(node_json.transition_events) do
+                local tree_evts = tree_node:get_data():get_transition_events()[j-1]
+
+                if type(tree_evts) == "table" then
+                    increase_node_array_size(node_name, "node transition event element", json_evts, tree_evts)
+
+                    for k, evt in ipairs(json_evts) do
+                        tree_evts[k-1] = evt
+                    end
+                end
+            end     
+        end
+    end
 end
 
 local function draw_stupid_editor(name)
