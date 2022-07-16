@@ -2453,6 +2453,14 @@ local function save_tree(tree, filename)
             condition_tbl.type = condition:get_type_definition():get_full_name()
             condition_tbl.fields = {}
             condition_tbl.properties = {}
+
+            if custom_condition_evaluators[condition] ~= nil then
+                condition_tbl.evaluator = {
+                    payload = custom_condition_evaluators[condition].eval_str
+                }
+            else
+                condition_tbl.evaluator = nil
+            end
             
             local t = condition:get_type_definition()
 
@@ -2618,7 +2626,7 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
         return true
     end
 
-    local load_objects = function(metaname, json_objects, tree_objects)
+    local load_objects = function(metaname, json_objects, tree_objects, on_add_predicate)
         -- Resize the objects array (actions, conditions, etc) to match the loaded tree.
         if not increase_array_size(metaname, json_objects, tree_objects) then
             return
@@ -2657,6 +2665,10 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
             if new_object ~= current_object then
                 tree_objects[i-1] = new_object
             end
+
+            if on_add_predicate then
+                on_add_predicate(object_tbl, new_object)
+            end
         end
 
         log.debug("File has " .. tostring(num_matching) .. " " .. metaname .. " objects that already match the current tree")
@@ -2673,10 +2685,20 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
         end
     end
 
+    local on_add_condition = function(json_object, condition)
+        if json_object.evaluator ~= nil then
+            if json_object.evaluator.payload ~= nil then
+                log.debug("Loading condition evaluator payload for condition " .. condition:get_type_definition():get_full_name() .. "...")
+                log.debug("Payload: " .. tostring(json_object.evaluator.payload))
+                add_condition_hook(condition, json_object.evaluator.payload)
+            end
+        end
+    end
+
     load_objects("action", loaded_tree.actions, tree:get_actions())
-    load_objects("condition", loaded_tree.conditions, tree:get_conditions())
+    load_objects("condition", loaded_tree.conditions, tree:get_conditions(), on_add_condition)
     load_objects("static action", loaded_tree.tree_data.static_actions, tree:get_data():get_static_actions())
-    load_objects("static condition", loaded_tree.tree_data.static_conditions, tree:get_data():get_static_conditions())
+    load_objects("static condition", loaded_tree.tree_data.static_conditions, tree:get_data():get_static_conditions(), on_add_condition)
     load_objects("transition event", loaded_tree.transition_events, tree:get_transitions())
 
     load_integers("action method", loaded_tree.tree_data.action_methods, tree:get_data():get_action_methods())
@@ -2685,7 +2707,7 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
     local increase_node_array_size = function(node_name, metaname, json_objects, tree_objects)
         if json_objects == nil or json_objects == "NULL" then
             if tree_objects ~= nil and tree_objects:size() > 0 then
-                log.debug("Current node has " .. metaname .. " object array that is not empty like the saved node. Emptying array...")
+                log.debug("Current node "  .. node_name .. " has " .. metaname .. " object array that should be empty. Emptying array...")
 
                 while tree_objects:size() ~= 0 do
                     tree_objects:pop_back()
