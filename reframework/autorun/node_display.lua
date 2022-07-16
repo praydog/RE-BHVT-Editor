@@ -2585,7 +2585,16 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
 
     local increase_array_size = function(metaname, json_objects, tree_objects)
         if json_objects == nil then
-            log.error("Saved tree has no " .. metaname .. " objects")
+            log.debug("Saved tree has no " .. metaname .. " objects")
+
+            --[[if tree_objects ~= nil and tree_objects:size() > 0 then
+                log.debug("Current tree has " .. metaname .. " object array that is not empty like the JSON file. Emptying array...")
+
+                while tree_objects:size() ~= 0 do
+                    tree_objects:pop_back()
+                end
+            end]]
+
             return false
         end
     
@@ -2674,7 +2683,15 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
     load_integers("static action method", loaded_tree.tree_data.static_action_methods, tree:get_data():get_static_action_methods())
 
     local increase_node_array_size = function(node_name, metaname, json_objects, tree_objects)
-        if json_objects == nil then
+        if json_objects == nil or json_objects == "NULL" then
+            if tree_objects ~= nil and tree_objects:size() > 0 then
+                log.debug("Current node has " .. metaname .. " object array that is not empty like the saved node. Emptying array...")
+
+                while tree_objects:size() ~= 0 do
+                    tree_objects:pop_back()
+                end
+            end
+
             return false
         end
     
