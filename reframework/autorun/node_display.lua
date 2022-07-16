@@ -439,62 +439,94 @@ local function display_event(tree, i, j, node, name, event)
     end
 end
 
-local replace_condition_id_text = ""
-
 local custom_condition_evaluators = {}
+
+local function add_condition_hook(cond, eval_payload)
+    if eval_payload == nil then
+        eval_payload = "return function(storage, cond, arg, retval)\n\treturn retval\nend"
+    end
+
+    local hook = custom_condition_evaluators[cond]
+
+    if hook == nil then
+        custom_condition_evaluators[cond] = {}
+        custom_condition_evaluators[cond].storage = {}
+
+        hook = custom_condition_evaluators[cond]
+
+        -- Only hook function once if it didn't exist before.
+        local add_evaluator = function()
+            local prev_args = nil
+    
+            sdk.hook_vtable(
+                cond, 
+                cond:get_type_definition():get_method("evaluate"), 
+                function(args)
+                    prev_args = args
+                end,
+                function(retval)
+                    local hook = custom_condition_evaluators[cond]
+                    local old_retval = (sdk.to_int64(retval) & 1) == 1
+                    local new_retval = 
+                        hook.eval(
+                            hook.storage,
+                            sdk.to_managed_object(prev_args[2]), 
+                            sdk.to_managed_object(prev_args[3]), 
+                            old_retval
+                        )
+    
+                    --[[if sdk.to_int64(new_retval) ~= old_retval then
+                        log.debug("Condition changed by Lua!" .. " " .. string.format("%i->%i", old_retval, sdk.to_int64(new_retval)))
+                    else                  
+                        if sdk.to_int64(retval) == 1 then
+                            log.debug("Condition met!")
+                        else
+                            log.debug("Condition not met!")
+                        end
+                    end]]
+    
+                    return sdk.to_ptr(new_retval)
+                end
+            )
+        end
+    
+        add_evaluator()
+    end
+
+    hook.eval_str = eval_payload
+    hook.eval_init, hook.err = load(hook.eval_str)
+
+    if not hook.err then
+        hook.eval = hook.eval_init()
+    else
+        hook.eval = nil
+    end
+end
+
+local replace_condition_id_text = ""
 
 local function display_condition(tree, i, node, name, cond)
     if imgui.tree_node(name) then
         if not custom_condition_evaluators[cond] then
             if imgui.button("Add Lua Driven Evaluator") then
-                custom_condition_evaluators[cond] = {}
-                custom_condition_evaluators[cond].str = "return function(storage, cond, arg, retval)\n\treturn retval\nend"
-                custom_condition_evaluators[cond].eval = load(custom_condition_evaluators[cond].str)
-                custom_condition_evaluators[cond].storage = {}
-
-                local add_evaluator = function()
-                    local prev_args = nil
-    
-                    sdk.hook_vtable(
-                        cond, 
-                        cond:get_type_definition():get_method("evaluate"), 
-                        function(args)
-                            prev_args = args
-                        end,
-                        function(retval)
-                            local old_retval = (sdk.to_int64(retval) & 1) == 1
-                            local new_retval = 
-                                custom_condition_evaluators[cond].eval()(
-                                    custom_condition_evaluators[cond].storage,
-                                    sdk.to_managed_object(prev_args[2]), 
-                                    sdk.to_managed_object(prev_args[3]), 
-                                    old_retval
-                                )
-
-                            --[[if sdk.to_int64(new_retval) ~= old_retval then
-                                log.debug("Condition changed by Lua!" .. " " .. string.format("%i->%i", old_retval, sdk.to_int64(new_retval)))
-                            else                  
-                                if sdk.to_int64(retval) == 1 then
-                                    log.debug("Condition met!")
-                                else
-                                    log.debug("Condition not met!")
-                                end
-                            end]]
-
-                            return sdk.to_ptr(new_retval)
-                        end
-                    )
-                end
-    
-                add_evaluator()
+                add_condition_hook(cond)
             end
         else
             imgui.text("Press CTRL+Enter for the changes to take effect.")
 
+            local hook = custom_condition_evaluators[cond]
             local changed = false
 
             local cursor_screen_pos = imgui.get_cursor_screen_pos()
-            changed, custom_condition_evaluators[cond].str = imgui.input_text_multiline("Evaluator", custom_condition_evaluators[cond].str)
+            changed, hook.eval_str = imgui.input_text_multiline("Evaluator", custom_condition_evaluators[cond].eval_str)
+
+            if not hook.eval_init or not hook.eval then
+                hook.eval_init, hook.err = load(hook.eval_str)
+
+                if not hook.err then
+                    hook.eval = hook.eval_init()
+                end
+            end
     
             if imgui.is_item_active() then
                 imgui.open_popup(tostring(cond) .. ": Evaluator")
@@ -509,11 +541,15 @@ local function display_condition(tree, i, node, name, cond)
     
             if imgui.begin_popup(tostring(cond) .. ": Evaluator", (1 << 18) | (1 << 19)) then
                 imgui.set_next_item_width(last_input_width)
-                changed, custom_condition_evaluators[cond].str, tstart, tend = imgui.input_text_multiline("Evaluator", custom_condition_evaluators[cond].str, {0,0}, (1 << 5) | (1 << 10) | (1 << 8))
+                changed, hook.eval_str, tstart, tend = imgui.input_text_multiline("Evaluator", hook.eval_str, {0,0}, (1 << 5) | (1 << 10) | (1 << 8))
         
                 if changed then
                     local err = nil
-                    custom_condition_evaluators[cond].eval, custom_condition_evaluators[cond].err = load(custom_condition_evaluators[cond].str)
+                    hook.eval_init, hook.err = load(hook.eval_str)
+
+                    if not hook.err then
+                        hook.eval = hook.eval_init()
+                    end
                 end
         
                 imgui.end_popup()
@@ -525,8 +561,8 @@ local function display_condition(tree, i, node, name, cond)
                 custom_condition_evaluators[cond].eval, custom_condition_evaluators[cond].err = load(custom_condition_evaluators[cond].str)
                 
             end]]
-            if custom_condition_evaluators[cond].err then
-                imgui.text(custom_condition_evaluators[cond].err)
+            if hook.err then
+                imgui.text(hook.err)
             end
         end
 
