@@ -481,6 +481,10 @@ local function add_condition_hook(cond, eval_payload)
                 end,
                 function(retval)
                     local hook = custom_condition_evaluators[cond]
+                    if not hook then
+                        return retval
+                    end
+
                     local old_retval = (sdk.to_int64(retval) & 1) == 1
                     local new_retval = 
                         hook.eval(
@@ -535,6 +539,14 @@ local function display_condition(tree, i, node, name, cond)
             local cursor_screen_pos = imgui.get_cursor_screen_pos()
             changed, hook.eval_str = imgui.input_text_multiline("Evaluator", custom_condition_evaluators[cond].eval_str)
 
+            if imgui.begin_popup_context_item("evaluator_popup") then
+                if imgui.button("Remove Evaluator") then
+                    custom_condition_evaluators[cond] = nil
+                end
+
+                imgui.end_popup()
+            end
+
             if not hook.eval_init or not hook.eval then
                 hook.eval_init, hook.err = load(hook.eval_str)
 
@@ -555,6 +567,7 @@ local function display_condition(tree, i, node, name, cond)
             imgui.set_next_window_pos(cursor_screen_pos)
     
             if imgui.begin_popup(tostring(cond) .. ": Evaluator", (1 << 18) | (1 << 19)) then
+                
                 imgui.set_next_item_width(last_input_width)
                 changed, hook.eval_str, tstart, tend = imgui.input_text_multiline("Evaluator", hook.eval_str, {0,0}, (1 << 5) | (1 << 10) | (1 << 8))
         
@@ -565,6 +578,14 @@ local function display_condition(tree, i, node, name, cond)
                     if not hook.err then
                         hook.eval = hook.eval_init()
                     end
+                end
+
+                if imgui.begin_popup_context_item("evaluator_popup2") then
+                    if imgui.button("Remove Evaluator") then
+                        custom_condition_evaluators[cond] = nil
+                    end
+    
+                    imgui.end_popup()
                 end
         
                 imgui.end_popup()
