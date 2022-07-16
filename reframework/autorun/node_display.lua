@@ -51,6 +51,21 @@ local node_names = {}
 local first_times = {}
 local sort_dict = {}
 
+local function recreate_globals()
+    action_map = {}
+    action_name_map = {}
+    event_map = {}
+    event_name_map = {}
+    condition_map = {}
+    condition_name_map = {}
+    selection_map = {}
+    condition_selection_map = {}
+    node_map = {}
+    node_names = {}
+    first_times = {}
+    sort_dict = {}
+end
+
 local node_replacements = {
 
 }
@@ -1264,6 +1279,12 @@ local id_lookup = 0
 local duplicate_id = 0
 
 local function cache_tree(core, tree)
+    if first_times[tree] == nil then
+        cached_node_indices = {}
+        cached_node_names = {}
+        sort_dict = {}
+    end
+
     local sorted_nodes = get_sorted_nodes(tree)
 
     cache_node_indices(sorted_nodes, tree)
@@ -1317,6 +1338,10 @@ local function cache_tree(core, tree)
 
         for i=0, condition_count-1 do
             local condition = tree:get_condition(i)
+
+            if not sdk.is_managed_object(condition) then
+                log.debug("Condition " .. tostring(i) .. " in " .. string.format("%x", tree:as_memoryview():get_address()) .. " is not a managed object (" .. tostring(condition) .. ")")
+            end
     
             if condition ~= nil then
                 table.insert(condition_map[tree], {index=i, ["condition"]=condition})
@@ -3106,6 +3131,8 @@ local function draw_stupid_editor(name)
 
     if (tree ~= nil and (active_tree == nil or tree ~= active_tree)) then
         log.debug("Recreating active tree")
+
+        recreate_globals()
 
         custom_tree = {}
         updated_tree = true
