@@ -334,6 +334,142 @@ local find_event_index = function(tree, event)
     return 0
 end
 
+local function display_hook(metaname, hook_tbl, obj, creation_function)
+    local hook = hook_tbl[obj]
+
+    if not hook then
+        if imgui.button("Add Lua Driven " .. metaname) then
+            creation_function(obj)
+        end
+    else
+        imgui.text("Press CTRL+Enter for the changes to take effect.")
+
+        local changed = false
+
+        local cursor_screen_pos = imgui.get_cursor_screen_pos()
+        changed, hook.payload = imgui.input_text_multiline(metaname, hook.payload)
+
+        if imgui.begin_popup_context_item(metaname .. "_popup") then
+            if imgui.button("Remove " .. metaname) then
+                hook_tbl[obj] = nil
+            end
+
+            imgui.end_popup()
+        end
+
+        if not hook.init or not hook.eval then
+            hook.init, hook.err = load(hook.payload)
+
+            if not hook.err then
+                hook.func = hook.init()
+            end
+        end
+
+        if imgui.is_item_active() then
+            imgui.open_popup(tostring(obj) .. ": " .. metaname)
+        end
+
+        local last_input_width = imgui.calc_item_width()
+
+        -- Causes the textbox to be overlayed on top of the existing textbox
+        -- because for some reason the textbox inside the node doesn't accept TAB input
+        -- however, the popup version does.
+        imgui.set_next_window_pos(cursor_screen_pos)
+
+        if imgui.begin_popup(tostring(obj) .. ": " .. metaname, (1 << 18) | (1 << 19)) then
+            
+            imgui.set_next_item_width(last_input_width)
+            changed, hook.payload, tstart, tend = imgui.input_text_multiline(metaname, hook.payload, {0,0}, (1 << 5) | (1 << 10) | (1 << 8))
+    
+            if changed then
+                local err = nil
+                hook.init, hook.err = load(hook.payload)
+
+                if not hook.err then
+                    hook.func = hook.init()
+                end
+            end
+
+            if imgui.begin_popup_context_item(metaname .. "_popup2") then
+                if imgui.button("Remove " .. metaname) then
+                    hook_tbl[obj] = nil
+                end
+
+                imgui.end_popup()
+            end
+    
+            imgui.end_popup()
+        end
+
+
+        --[[if changed then
+            local err = nil
+            custom_condition_evaluators[cond].eval, custom_condition_evaluators[cond].err = load(custom_condition_evaluators[cond].str)
+            
+        end]]
+        if hook.err then
+            imgui.text(hook.err)
+        end
+    end
+end
+
+local custom_action_start_hooks = {}
+
+local function add_action_hook(action, start_payload)
+    if start_payload == nil then
+        start_payload = "return function(storage, action, arg)\nend"
+    end
+
+    local hook = custom_action_start_hooks[action]
+
+    if hook == nil then
+        custom_action_start_hooks[action] = {}
+        custom_action_start_hooks[action].storage = {}
+
+        hook = custom_action_start_hooks[action]
+
+        -- Only hook function once if it didn't exist before.
+        local add_start = function()
+            local prev_args = nil
+    
+            sdk.hook_vtable(
+                action, 
+                action:get_type_definition():get_method("start"), 
+                function(args)
+                    prev_args = args
+                end,
+                function(retval)
+                    local hook = custom_action_start_hooks[action]
+                    if not hook then
+                        return retval
+                    end
+
+                    hook.func(
+                        hook.storage,
+                        sdk.to_managed_object(prev_args[2]), 
+                        sdk.to_managed_object(prev_args[3])
+                    )
+    
+                    return retval
+                end
+            )
+        end
+    
+        add_start()
+    end
+
+    hook.payload = start_payload
+    hook.init, hook.err = load(hook.payload)
+
+    if not hook.err then
+        hook.func = hook.init()
+    else
+        hook.func = nil
+    end
+end
+
+local replace_action_id_text = ""
+
 local function display_action(tree, i, node, name, action)
     local enabled = action:call("get_Enabled")
     local status = enabled and "ON" or "OFF"
@@ -347,6 +483,8 @@ local function display_action(tree, i, node, name, action)
     imgui.same_line()
     imgui.text(name)
     if made then
+        display_hook("Start", custom_action_start_hooks, action, add_action_hook)
+
         if node ~= nil then
             if action ~= nil then
                 imgui.input_text("Address", string.format("%X", action:get_address()))
@@ -2424,6 +2562,14 @@ local function save_tree(tree, filename)
             action_tbl.type = action:get_type_definition():get_full_name()
             action_tbl.fields = {}
             action_tbl.properties = {}
+
+            if custom_action_start_hooks[action] ~= nil then
+                action_tbl.start = {
+                    payload = custom_action_start_hooks[action].payload
+                }
+            else
+                action_tbl.start = nil
+            end
             
             local t = action:get_type_definition()
 
@@ -2449,6 +2595,14 @@ local function save_tree(tree, filename)
             action_tbl.type = action:get_type_definition():get_full_name()
             action_tbl.fields = {}
             action_tbl.properties = {}
+
+            if custom_action_start_hooks[action] ~= nil then
+                action_tbl.start = {
+                    payload = custom_action_start_hooks[action].payload
+                }
+            else
+                action_tbl.start = nil
+            end
             
             local t = action:get_type_definition()
 
@@ -2724,9 +2878,19 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
         end
     end
 
-    load_objects("action", loaded_tree.actions, tree:get_actions())
+    local on_add_action = function(json_object, action)
+        if json_object.start ~= nil then
+            if json_object.start.payload ~= nil then
+                log.debug("Loading action start payload for action " .. action:get_type_definition():get_full_name() .. "...")
+                log.debug("Payload: " .. tostring(json_object.start.payload))
+                add_action_hook(action, json_object.start.payload)
+            end
+        end
+    end
+
+    load_objects("action", loaded_tree.actions, tree:get_actions(), on_add_action)
     load_objects("condition", loaded_tree.conditions, tree:get_conditions(), on_add_condition)
-    load_objects("static action", loaded_tree.tree_data.static_actions, tree:get_data():get_static_actions())
+    load_objects("static action", loaded_tree.tree_data.static_actions, tree:get_data():get_static_actions(), on_add_action)
     load_objects("static condition", loaded_tree.tree_data.static_conditions, tree:get_data():get_static_conditions(), on_add_condition)
     load_objects("transition event", loaded_tree.transition_events, tree:get_transitions())
 
