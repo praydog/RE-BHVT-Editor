@@ -2507,6 +2507,14 @@ local function save_tree(tree, filename)
             static_condition_tbl.type = static_condition:get_type_definition():get_full_name()
             static_condition_tbl.fields = {}
             static_condition_tbl.properties = {}
+
+            if custom_condition_evaluators[static_condition] ~= nil then
+                static_condition_tbl.evaluator = {
+                    payload = custom_condition_evaluators[static_condition].eval_str
+                }
+            else
+                static_condition_tbl.evaluator = nil
+            end
             
             local t = static_condition:get_type_definition()
 
@@ -2963,10 +2971,10 @@ local function draw_stupid_editor(name)
                             end
                         end
 
-                        if not already_set then
+                        --[[if not already_set then
                             queued_editor_id_move = {["i"] = i, ["id"] = id}
                             already_set = true
-                        end
+                        end]]
 
                         -- Limit the search results to 200 and break out early
                         if #last_search_results_node > cfg.max_search_results then
