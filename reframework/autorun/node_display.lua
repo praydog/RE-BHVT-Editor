@@ -361,7 +361,7 @@ local function display_hook(metaname, hook_tbl, obj, creation_function)
             hook.init, hook.err = load(hook.payload)
 
             if not hook.err then
-                hook.func, hook.err = pcall(hook.init)
+                hook.err, hook.func = pcall(hook.init)
             end
         end
 
@@ -385,7 +385,7 @@ local function display_hook(metaname, hook_tbl, obj, creation_function)
                 hook.init, hook.err = load(hook.payload)
 
                 if not hook.err then
-                    hook.func, hook.err = pcall(hook.init)
+                    hook.err, hook.func = pcall(hook.init)
                 end
             end
 
@@ -461,7 +461,7 @@ local function add_action_hook(action, start_payload)
     hook.init, hook.err = load(hook.payload)
 
     if not hook.err then
-        hook.func, hook.err = pcall(hook.init)
+        hook.err, hook.func = pcall(hook.init)
     else
         hook.func = nil
     end
