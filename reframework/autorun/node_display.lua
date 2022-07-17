@@ -460,7 +460,7 @@ local function add_action_hook(hook_name, action, payload, postfunc)
                         return retval
                     end
     
-                    return hook.func(table.unpack(postfunc(prev_args, retval)))
+                    return hook.func(storage, table.unpack(postfunc(prev_args, retval)))
                 end
             )
         end
