@@ -412,20 +412,37 @@ local function display_hook(metaname, hook_tbl, obj, creation_function)
     end
 end
 
+local action_hooks = {
+    storage = {},
+    start = {
+        default_payload = "return function(storage, action, arg)\nend"
+    },
+    update = {
+        default_payload = "return function(storage, action, arg)\nend"
+    },
+    ["end"] = {
+        default_payload = "return function(storage, action, arg)\nend"
+    },
+}
+
 local custom_action_start_hooks = {}
 
-local function add_action_hook(action, start_payload)
-    if start_payload == nil then
-        start_payload = "return function(storage, action, arg)\nend"
+local function add_action_hook(hook_name, action, payload, postfunc)
+    if not action_hooks[hook_name] then
+        log.debug("Unknown action hook " .. hook_name)
+        return
     end
 
-    local hook = custom_action_start_hooks[action]
+    if payload == nil then
+        payload = action_hooks[hook_name].default_payload
+    end
+
+    local hook = action_hooks[hook_name][action]
 
     if hook == nil then
-        custom_action_start_hooks[action] = {}
-        custom_action_start_hooks[action].storage = {}
+        action_hooks[hook_name][action] = {}
 
-        hook = custom_action_start_hooks[action]
+        hook = action_hooks[hook_name][action]
 
         -- Only hook function once if it didn't exist before.
         local add_start = function()
@@ -433,23 +450,17 @@ local function add_action_hook(action, start_payload)
     
             sdk.hook_vtable(
                 action, 
-                action:get_type_definition():get_method("start"), 
+                action:get_type_definition():get_method(hook_name), 
                 function(args)
                     prev_args = args
                 end,
                 function(retval)
-                    local hook = custom_action_start_hooks[action]
+                    local hook = action_hooks[hook_name][action]
                     if not hook then
                         return retval
                     end
-
-                    hook.func(
-                        hook.storage,
-                        sdk.to_managed_object(prev_args[2]), 
-                        sdk.to_managed_object(prev_args[3])
-                    )
     
-                    return retval
+                    return hook.func(table.unpack(postfunc(prev_args, retval)))
                 end
             )
         end
@@ -457,7 +468,7 @@ local function add_action_hook(action, start_payload)
         add_start()
     end
 
-    hook.payload = start_payload
+    hook.payload = payload
     hook.init, hook.err = load(hook.payload)
 
     if not hook.err then
@@ -465,6 +476,33 @@ local function add_action_hook(action, start_payload)
     else
         hook.func = nil
     end
+end
+
+local function add_action_start_hook(action, payload)
+    add_action_hook("start", action, payload, function(prev_args, retval)
+        return { 
+                sdk.to_managed_object(prev_args[2]), 
+                sdk.to_managed_object(prev_args[3])
+            }
+    end)
+end
+
+local function add_action_update_hook(action, payload)
+    add_action_hook("update", action, payload, function(prev_args, retval)
+        return { 
+                sdk.to_managed_object(prev_args[2]), 
+                sdk.to_managed_object(prev_args[3])
+            }
+    end)
+end
+
+local function add_action_end_hook(action, payload)
+    add_action_hook("end", action, payload, function(prev_args, retval)
+        return { 
+                sdk.to_managed_object(prev_args[2]), 
+                sdk.to_managed_object(prev_args[3])
+            }
+    end)
 end
 
 local replace_action_id_text = ""
@@ -482,7 +520,9 @@ local function display_action(tree, i, node, name, action)
     imgui.same_line()
     imgui.text(name)
     if made then
-        display_hook("Start", custom_action_start_hooks, action, add_action_hook)
+        display_hook("Start", action_hooks.start, action, add_action_start_hook)
+        display_hook("Update", action_hooks.update, action, add_action_update_hook)
+        display_hook("End", action_hooks["end"], action, add_action_end_hook)
 
         if node ~= nil then
             if action ~= nil then
@@ -2577,12 +2617,28 @@ local function save_tree(tree, filename)
             action_tbl.fields = {}
             action_tbl.properties = {}
 
-            if custom_action_start_hooks[action] ~= nil then
+            if action_hooks.start[action] ~= nil then
                 action_tbl.start = {
-                    payload = custom_action_start_hooks[action].payload
+                    payload = action_hooks.start[action].payload
                 }
             else
                 action_tbl.start = nil
+            end
+
+            if action_hooks.update[action] ~= nil then
+                action_tbl.update = {
+                    payload = action_hooks.update[action].payload
+                }
+            else
+                action_tbl.update = nil
+            end
+
+            if action_hooks["end"][action] ~= nil then
+                action_tbl["end"] = {
+                    payload = action_hooks["end"][action].payload
+                }
+            else
+                action_tbl["end"] = nil
             end
             
             local t = action:get_type_definition()
@@ -2610,14 +2666,30 @@ local function save_tree(tree, filename)
             action_tbl.fields = {}
             action_tbl.properties = {}
 
-            if custom_action_start_hooks[action] ~= nil then
+            if action_hooks.start[action] ~= nil then
                 action_tbl.start = {
-                    payload = custom_action_start_hooks[action].payload
+                    payload = action_hooks.start[action].payload
                 }
             else
                 action_tbl.start = nil
             end
-            
+
+            if action_hooks.update[action] ~= nil then
+                action_tbl.update = {
+                    payload = action_hooks.update[action].payload
+                }
+            else
+                action_tbl.update = nil
+            end
+
+            if action_hooks["end"][action] ~= nil then
+                action_tbl["end"] = {
+                    payload = action_hooks["end"][action].payload
+                }
+            else
+                action_tbl["end"] = nil
+            end
+
             local t = action:get_type_definition()
 
             while t ~= nil do
@@ -2897,7 +2969,23 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
             if json_object.start.payload ~= nil then
                 log.debug("Loading action start payload for action " .. action:get_type_definition():get_full_name() .. "...")
                 log.debug("Payload: " .. tostring(json_object.start.payload))
-                add_action_hook(action, json_object.start.payload)
+                add_action_start_hook(action, json_object.start.payload)
+            end
+        end
+
+        if json_object.update ~= nil then
+            if json_object.update.payload ~= nil then
+                log.debug("Loading action update payload for action " .. action:get_type_definition():get_full_name() .. "...")
+                log.debug("Payload: " .. tostring(json_object.update.payload))
+                add_action_update_hook(action, json_object.update.payload)
+            end
+        end
+
+        if json_object["end"] ~= nil then
+            if json_object["end"].payload ~= nil then
+                log.debug("Loading action end payload for action " .. action:get_type_definition():get_full_name() .. "...")
+                log.debug("Payload: " .. tostring(json_object["end"].payload))
+                add_action_end_hook(action, json_object["end"].payload)
             end
         end
     end
