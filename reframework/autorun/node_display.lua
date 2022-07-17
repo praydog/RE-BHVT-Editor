@@ -1490,6 +1490,7 @@ end
 local last_action_update_time = 0
 local id_lookup = 0
 local duplicate_id = 0
+local action_add_class_name = "via.behaviortree.Action"
 
 local function cache_tree(core, tree)
     if first_times[tree] == nil then
@@ -1574,6 +1575,22 @@ local function display_tree(core, tree)
     local now = os.clock()
 
     cache_tree(core, tree)
+
+    local changed = false
+
+    changed, action_add_class_name = imgui.input_text("Create Action by class name", action_add_class_name, 1 << 5)
+
+    if changed then
+        local new_action = sdk.create_instance(action_add_class_name)
+
+        if new_action then
+            new_action = new_action:add_ref()
+            tree:get_actions():push_back(new_action:add_ref_permanent())
+            tree:get_data():get_action_methods():push_back(1|2|4|8|16|32)
+
+            first_times = {}
+        end
+    end
 
     changed, duplicate_id = imgui.input_text("Duplicate Action", duplicate_id, 1 << 5)
 
@@ -3109,6 +3126,7 @@ end
 
 local popup_ask_filename = "my_cool_tree"
 local ask_overwrite_filename = ""
+local chosen_layer = 0
 
 local function draw_stupid_editor(name)
     if cfg.graph_closes_with_reframework then
@@ -3125,12 +3143,11 @@ local function draw_stupid_editor(name)
     local layer = nil
 
     local player = get_localplayer()
+    local motion_fsm2 = player and player:call("getComponent(System.Type)", sdk.typeof("via.motion.MotionFsm2")) or nil
 
     if player ~= nil then
-        local motion_fsm2 = player:call("getComponent(System.Type)", sdk.typeof("via.motion.MotionFsm2"))
-
         if motion_fsm2 ~= nil then
-            layer = motion_fsm2:call("getLayer", 0)
+            layer = motion_fsm2:call("getLayer", chosen_layer)
 
             if layer ~= nil then
                 tree = layer:get_tree_object()
@@ -3479,6 +3496,13 @@ local function draw_stupid_editor(name)
         changed, cfg.default_node = imgui.drag_int("Display Node", cfg.default_node, 0, #custom_tree)
         if changed and tree ~= nil and cfg.default_node < tree:get_node_count() then
             queued_editor_id_move = {["i"] = cfg.default_node, ["id"] = tree:get_node(cfg.default_node):get_id()}
+        end
+
+        -- Selected layer
+        changed, chosen_layer = imgui.slider_int("Selected layer", chosen_layer, 0, motion_fsm2:call("getLayerCount")-1)
+
+        if changed then
+            first_times = {}
         end
 
         imgui.pop_item_width()
