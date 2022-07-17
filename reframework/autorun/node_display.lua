@@ -361,7 +361,7 @@ local function display_hook(metaname, hook_tbl, obj, creation_function)
             hook.init, hook.err = load(hook.payload)
 
             if not hook.err then
-                hook.func = hook.init()
+                hook.func, hook.err = pcall(hook.init)
             end
         end
 
@@ -386,7 +386,7 @@ local function display_hook(metaname, hook_tbl, obj, creation_function)
                 hook.init, hook.err = load(hook.payload)
 
                 if not hook.err then
-                    hook.func = hook.init()
+                    hook.func, hook.err = pcall(hook.init)
                 end
             end
 
@@ -1364,7 +1364,11 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                                 return tree:get_transitions()[x]
                             end,
                             function(tree, j, node, element_tree)
-                                display_event(tree, i, j, node, tostring(evts[j]) .. ": " .. tostring(element_tree:get_type_definition():get_full_name()), element_tree) -- TODO, DO THAT ONE!
+                                if element_tree ~= nil then
+                                    display_event(tree, i, j, node, tostring(evts[j]) .. ": " .. tostring(element_tree:get_type_definition():get_full_name()), element_tree) -- TODO, DO THAT ONE!
+                                else
+                                    imgui.text(tostring(evts[j]) .. ": [ NULL ] (WILL CRASH, REMOVE THIS EVENT)")
+                                end
                             end,
                             function(j, element)
                                 if element == nil then
@@ -2966,16 +2970,41 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
 
         if increase_node_array_size(node_name, "transition event", node_json.transition_events, tree_node:get_data():get_transition_events()) then
             for j, json_evts in ipairs(node_json.transition_events) do
-                local tree_evts = tree_node:get_data():get_transition_events()[j-1]
-
-                if type(json_evts) == "table" then
-                    increase_node_array_size(node_name, "transition event element", json_evts, tree_evts)
-
+                if increase_node_array_size(node_name, "transition event element", json_evts, tree_node:get_data():get_transition_events()[j-1]) and type(json_evts) == "table" then
                     for k, evt in ipairs(json_evts) do
-                        tree_evts[k-1] = evt
+                        if evt >= tree:get_transitions():size() then
+                            log.debug("Saved transition event element " .. tostring(k-1) .. " for node " .. node_name .. " references a transition (" .. tostring(evt) .. ") that does not exist. A crash may occur.")
+                        end
+
+                        tree_node:get_data():get_transition_events()[j-1][k-1] = evt
                     end
                 end
             end     
+        end
+        
+        -- Fix nonexistent transition events.
+        if tree_node:get_data():get_transition_events():size() > 0 then
+            for k=0, tree_node:get_data():get_transition_events():size()-1 do
+                local events = tree_node:get_data():get_transition_events()[k]
+                local j = 0
+                while true do
+                    if events:size() == 0 then
+                        break
+                    end
+
+                    if j >= events:size() then
+                        break
+                    end
+
+                    if events[j] >= tree:get_transitions():size() then
+                        log.debug("Erasing nonexistent transition event element " .. tostring(j) .. "(" .. tostring(events[j]) .. ") for node " .. node_name .. ".")
+                        events:erase(j)
+                        j = 0
+                    else
+                        j = j + 1
+                    end
+                end
+            end
         end
     end
 end
