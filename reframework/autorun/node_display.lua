@@ -357,7 +357,7 @@ local function display_hook(metaname, hook_tbl, obj, creation_function)
             imgui.end_popup()
         end
 
-        if not hook.init or not hook.eval then
+        if not hook.init or not hook.func then
             hook.init, hook.err = load(hook.payload)
 
             if not hook.err then
@@ -382,7 +382,6 @@ local function display_hook(metaname, hook_tbl, obj, creation_function)
             changed, hook.payload, tstart, tend = imgui.input_text_multiline(metaname, hook.payload, {0,0}, (1 << 5) | (1 << 10) | (1 << 8))
     
             if changed then
-                local err = nil
                 hook.init, hook.err = load(hook.payload)
 
                 if not hook.err then
@@ -462,7 +461,7 @@ local function add_action_hook(action, start_payload)
     hook.init, hook.err = load(hook.payload)
 
     if not hook.err then
-        hook.func = hook.init()
+        hook.func, hook.err = pcall(hook.init)
     else
         hook.func = nil
     end
