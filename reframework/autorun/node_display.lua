@@ -460,7 +460,7 @@ local function add_action_hook(hook_name, action, payload, postfunc)
                         return retval
                     end
     
-                    return hook.func(storage, table.unpack(postfunc(prev_args, retval)))
+                    return hook.func(action_hooks.storage, table.unpack(postfunc(prev_args, retval)))
                 end
             )
         end
@@ -473,6 +473,13 @@ local function add_action_hook(hook_name, action, payload, postfunc)
 
     if not hook.err then
         hook.err, hook.func = pcall(hook.init)
+
+        if hook.err == false then
+            log.debug("Error in " .. hook_name .. " hook for action: " .. tostring(hook.err) .. " " .. tostring(hook.func))
+            log.error("Error in " .. hook_name .. " hook for action: " .. tostring(hook.err) .. " " .. tostring(hook.func))
+            hook.err = hook.func
+            hook.func = nil
+        end
     else
         hook.func = nil
     end
@@ -3127,6 +3134,8 @@ end
 local popup_ask_filename = "my_cool_tree"
 local ask_overwrite_filename = ""
 local chosen_layer = 0
+local quick_run = 0
+local prev_active_node = 0
 
 local function draw_stupid_editor(name)
     if cfg.graph_closes_with_reframework then
@@ -3486,9 +3495,9 @@ local function draw_stupid_editor(name)
             imgui.end_menu()
         end
 
-        -- Selected node
+        -- Active node
         imgui.separator()
-        imgui.text(tostring(#imnodes.get_selected_nodes()) .. " selected nodes")
+        imgui.text("ActiveNode: " .. tostring(prev_active_node))
 
         -- Display node
         imgui.separator()
@@ -3500,6 +3509,8 @@ local function draw_stupid_editor(name)
 
         -- Selected layer
         if motion_fsm2 ~= nil then
+            imgui.separator()
+
             changed, chosen_layer = imgui.slider_int("Selected layer", chosen_layer, 0, motion_fsm2:call("getLayerCount")-1)
 
             if changed then
@@ -3507,9 +3518,24 @@ local function draw_stupid_editor(name)
             end
         end
 
-        imgui.pop_item_width()
-
         imgui.separator()
+
+        if tree ~= nil then
+            changed, quick_run = imgui.input_text("Run node", quick_run, 1 << 5)
+
+            if changed or imgui.button("Run") then
+                local node = tree:get_node(tonumber(quick_run))
+
+                layer:call("setCurrentNode(System.UInt64, via.behaviortree.SetNodeInfo, via.motion.SetMotionTransitionInfo)", node:get_id(), nil, nil)
+                --queued_editor_id_move = {["i"] = quick_run, ["id"] = node:get_id()}
+            end
+        end
+
+        -- Selected node
+        imgui.separator()
+        imgui.text(tostring(#imnodes.get_selected_nodes()) .. " selected nodes")
+
+        imgui.pop_item_width()
 
         imgui.end_menu_bar()
     end
@@ -3623,18 +3649,30 @@ local function draw_stupid_editor(name)
 
             queued_editor_id_move = nil
         end
+        
+        local already_has_good_active = false
 
-        if cfg.follow_active_nodes then
+        if prev_active_node ~= 0 then
+            local node = prev_active_node < tree:get_node_count() and tree:get_node(prev_active_node)
+
+            if node then
+                already_has_good_active = (node:get_status1() == 2 or node:get_status2() == 2) and #tree:get_node(prev_active_node):get_children() == 0
+            end
+        end
+
+        if not already_has_good_active then
             for i=0, tree:get_node_count()-1 do
                 local node = tree:get_node(i)
 
                 if (node:get_status1() == 2 or node:get_status2() == 2) and #node:get_children() == 0 then
-                    local prev_default = cfg.default_node
+                    prev_active_node = i
 
-                    set_base_node_to_parent(tree, i)
+                    if cfg.follow_active_nodes then
+                        set_base_node_to_parent(tree, i)
 
-                    queued_editor_id_move_step2 = node:get_id()
-                    queued_editor_id_start_time = os.clock()
+                        queued_editor_id_move_step2 = node:get_id()
+                        queued_editor_id_start_time = os.clock()
+                    end
 
                     break
                 end
