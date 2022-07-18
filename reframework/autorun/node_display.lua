@@ -3499,10 +3499,12 @@ local function draw_stupid_editor(name)
         end
 
         -- Selected layer
-        changed, chosen_layer = imgui.slider_int("Selected layer", chosen_layer, 0, motion_fsm2:call("getLayerCount")-1)
+        if motion_fsm2 ~= nil then
+            changed, chosen_layer = imgui.slider_int("Selected layer", chosen_layer, 0, motion_fsm2:call("getLayerCount")-1)
 
-        if changed then
-            first_times = {}
+            if changed then
+                first_times = {}
+            end
         end
 
         imgui.pop_item_width()
