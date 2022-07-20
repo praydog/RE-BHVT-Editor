@@ -709,14 +709,26 @@ end
 local replace_condition_id_text = ""
 
 local function display_condition(tree, i, node, name, cond)
+    local uvar = nil
+
     if cond ~= nil then
         -- These are pretty opaque without metadata, so we need to display the name next to the condition.
         if cond:get_type_definition():is_a("via.behaviortree.ConditionUserVariable") then
             local guid = cond:get_Expression()
-            local uvar_hub = tree:get_uservariable_hub()
-            local uvar = uvar_hub:call("findVariable(System.Guid)", guid)
-            if uvar ~= nil then
-                name = name .. ": [" .. uvar:get_Name() .. "]"
+            --local uvar_hub = tree:get_uservariable_hub()
+            local uvar_hub = last_layer:get_UserVariable() -- why isn't this the same as the tree?
+
+            if uvar_hub ~= nil then
+                uvar = uvar_hub:call("findVariable(System.Guid)", guid)
+                if uvar ~= nil then
+                    name = name .. ": [" .. uvar:get_Name() .. "]"
+                else
+                    uvar = uvar_hub:call("findUserVariables(System.Guid)", guid)
+
+                    if uvar ~= nil then
+                        name = name .. ": [" .. uvar:get_Name() .. "]"
+                    end
+                end
             end
         end
     end
@@ -838,6 +850,14 @@ local function display_condition(tree, i, node, name, cond)
                 node:get_data():get_transition_conditions()[i] = tonumber(replace_condition_id_text)
             end
 
+        end
+
+        if uvar ~= nil then
+            if imgui.tree_node("UVar:" .. uvar:get_Name()) then
+                imgui.input_text("Address", string.format("%X", uvar:get_address()))
+                object_explorer:handle_address(uvar)
+                imgui.tree_pop()
+            end
         end
 
         object_explorer:handle_address(cond)
