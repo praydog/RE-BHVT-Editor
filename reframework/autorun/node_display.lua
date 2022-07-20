@@ -709,6 +709,18 @@ end
 local replace_condition_id_text = ""
 
 local function display_condition(tree, i, node, name, cond)
+    if cond ~= nil then
+        -- These are pretty opaque without metadata, so we need to display the name next to the condition.
+        if cond:get_type_definition():is_a("via.behaviortree.ConditionUserVariable") then
+            local guid = cond:get_Expression()
+            local uvar_hub = tree:get_uservariable_hub()
+            local uvar = uvar_hub:call("findVariable(System.Guid)", guid)
+            if uvar ~= nil then
+                name = name .. ": [" .. uvar:get_Name() .. "]"
+            end
+        end
+    end
+
     if imgui.tree_node(name) then
         if not custom_condition_evaluators[cond] then
             if imgui.button("Add Lua Driven Evaluator") then
@@ -1745,6 +1757,31 @@ local function display_tree(core, tree)
             end
         )
         
+        imgui.tree_pop()
+    end
+
+    --------------------------------------------------
+    ---------- EXPRESSION TREE CONDITIONS ------------
+    --------------------------------------------------
+    made = imgui.tree_node("Expression Tree Conditions")
+    imgui.same_line()
+    imgui.text(" [" .. tostring(tree:get_data():get_expression_tree_conditions():size()) .. "] ")
+
+    if made then
+        display_bhvt_array(tree, node, tree:get_data():get_expression_tree_conditions(), 
+            function(tree, x) 
+                return x
+            end, 
+            function(tree, i, node, element)
+                if element ~= nil then
+                    display_condition(tree, i, nil, tostring(i) .. ": " .. element:get_type_definition():get_full_name(), element)
+                else
+                    imgui.text(tostring(i) .. ": [ null ]")
+                end
+            end,
+            function(i, element)
+            end
+        )
         imgui.tree_pop()
     end
 
