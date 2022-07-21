@@ -3,6 +3,10 @@ if imnodes == nil or imgui.set_next_window_size == nil or sdk.hook_vtable == nil
     return
 end
 
+local HookManager = require("bhvteditor/HookManager")
+local ActionHook = require("bhvteditor/ActionHook")
+local ConditionHook = require("bhvteditor/ConditionHook")
+
 local ImGuiStyleVar =
 {
     --Enum name --------------------- --Member in ImGuiStyle structure (see ImGuiStyle for descriptions)
@@ -334,184 +338,6 @@ local find_event_index = function(tree, event)
     return 0
 end
 
-local function display_hook(metaname, hook_tbl, obj, creation_function)
-    local hook = hook_tbl[obj]
-
-    if not hook then
-        if imgui.button("Add Lua Driven " .. metaname) then
-            creation_function(obj)
-        end
-    else
-        imgui.text("Press CTRL+Enter for the changes to take effect.")
-
-        local changed = false
-
-        local cursor_screen_pos = imgui.get_cursor_screen_pos()
-        changed, hook.payload = imgui.input_text_multiline(metaname, hook.payload)
-
-        if imgui.begin_popup_context_item(metaname .. "_popup") then
-            if imgui.button("Remove " .. metaname) then
-                hook_tbl[obj] = nil
-            end
-
-            imgui.end_popup()
-        end
-
-        if not hook.init or not hook.func then
-            hook.init, hook.err = load(hook.payload)
-
-            if not hook.err then
-                hook.err, hook.func = pcall(hook.init)
-            end
-        end
-
-        if imgui.is_item_active() then
-            imgui.open_popup(tostring(obj) .. ": " .. metaname)
-        end
-
-        local last_input_width = imgui.calc_item_width()
-
-        -- Causes the textbox to be overlayed on top of the existing textbox
-        -- because for some reason the textbox inside the node doesn't accept TAB input
-        -- however, the popup version does.
-        imgui.set_next_window_pos(cursor_screen_pos)
-
-        if imgui.begin_popup(tostring(obj) .. ": " .. metaname, (1 << 18) | (1 << 19)) then
-            
-            imgui.set_next_item_width(last_input_width)
-            changed, hook.payload, tstart, tend = imgui.input_text_multiline(metaname, hook.payload, {0,0}, (1 << 5) | (1 << 10) | (1 << 8))
-    
-            if changed then
-                hook.init, hook.err = load(hook.payload)
-
-                if not hook.err then
-                    hook.err, hook.func = pcall(hook.init)
-                end
-            end
-
-            if imgui.begin_popup_context_item(metaname .. "_popup2") then
-                if imgui.button("Remove " .. metaname) then
-                    hook_tbl[obj] = nil
-                end
-
-                imgui.end_popup()
-            end
-    
-            imgui.end_popup()
-        end
-
-
-        --[[if changed then
-            local err = nil
-            custom_condition_evaluators[cond].eval, custom_condition_evaluators[cond].err = load(custom_condition_evaluators[cond].str)
-            
-        end]]
-        if hook.err then
-            imgui.text(hook.err)
-        end
-    end
-end
-
-local action_hooks = {
-    storage = {},
-    start = {
-        default_payload = "return function(storage, action, arg)\nend"
-    },
-    update = {
-        default_payload = "return function(storage, action, arg)\nend"
-    },
-    ["end"] = {
-        default_payload = "return function(storage, action, arg)\nend"
-    },
-}
-
-local custom_action_start_hooks = {}
-
-local function add_action_hook(hook_name, action, payload, postfunc)
-    if not action_hooks[hook_name] then
-        log.debug("Unknown action hook " .. hook_name)
-        return
-    end
-
-    if payload == nil then
-        payload = action_hooks[hook_name].default_payload
-    end
-
-    local hook = action_hooks[hook_name][action]
-
-    if hook == nil then
-        action_hooks[hook_name][action] = {}
-
-        hook = action_hooks[hook_name][action]
-
-        -- Only hook function once if it didn't exist before.
-        local add_start = function()
-            local prev_args = nil
-    
-            sdk.hook_vtable(
-                action, 
-                action:get_type_definition():get_method(hook_name), 
-                function(args)
-                    prev_args = args
-                end,
-                function(retval)
-                    local hook = action_hooks[hook_name][action]
-                    if not hook then
-                        return retval
-                    end
-    
-                    return hook.func(action_hooks.storage, table.unpack(postfunc(prev_args, retval)))
-                end
-            )
-        end
-    
-        add_start()
-    end
-
-    hook.payload = payload
-    hook.init, hook.err = load(hook.payload)
-
-    if not hook.err then
-        hook.err, hook.func = pcall(hook.init)
-
-        if hook.err == false then
-            log.debug("Error in " .. hook_name .. " hook for action: " .. tostring(hook.err) .. " " .. tostring(hook.func))
-            log.error("Error in " .. hook_name .. " hook for action: " .. tostring(hook.err) .. " " .. tostring(hook.func))
-            hook.err = hook.func
-            hook.func = nil
-        end
-    else
-        hook.func = nil
-    end
-end
-
-local function add_action_start_hook(action, payload)
-    add_action_hook("start", action, payload, function(prev_args, retval)
-        return { 
-                sdk.to_managed_object(prev_args[2]), 
-                sdk.to_managed_object(prev_args[3])
-            }
-    end)
-end
-
-local function add_action_update_hook(action, payload)
-    add_action_hook("update", action, payload, function(prev_args, retval)
-        return { 
-                sdk.to_managed_object(prev_args[2]), 
-                sdk.to_managed_object(prev_args[3])
-            }
-    end)
-end
-
-local function add_action_end_hook(action, payload)
-    add_action_hook("end", action, payload, function(prev_args, retval)
-        return { 
-                sdk.to_managed_object(prev_args[2]), 
-                sdk.to_managed_object(prev_args[3])
-            }
-    end)
-end
-
 local replace_action_id_text = ""
 
 local function display_action(tree, i, node, name, action)
@@ -527,9 +353,10 @@ local function display_action(tree, i, node, name, action)
     imgui.same_line()
     imgui.text(name)
     if made then
-        display_hook("Start", action_hooks.start, action, add_action_start_hook)
+        HookManager:get(action):display_hooks()
+        --[[display_hook("Start", action_hooks.start, action, add_action_start_hook)
         display_hook("Update", action_hooks.update, action, add_action_update_hook)
-        display_hook("End", action_hooks["end"], action, add_action_end_hook)
+        display_hook("End", action_hooks["end"], action, add_action_end_hook)]]
 
         if node ~= nil then
             if action ~= nil then
@@ -638,74 +465,6 @@ local function display_event(tree, i, j, node, name, event)
     end
 end
 
-local custom_condition_evaluators = {}
-
-local function add_condition_hook(cond, eval_payload)
-    if eval_payload == nil then
-        eval_payload = "return function(storage, cond, arg, retval)\n\treturn retval\nend"
-    end
-
-    local hook = custom_condition_evaluators[cond]
-
-    if hook == nil then
-        custom_condition_evaluators[cond] = {}
-        custom_condition_evaluators[cond].storage = {}
-
-        hook = custom_condition_evaluators[cond]
-
-        -- Only hook function once if it didn't exist before.
-        local add_evaluator = function()
-            local prev_args = nil
-    
-            sdk.hook_vtable(
-                cond, 
-                cond:get_type_definition():get_method("evaluate"), 
-                function(args)
-                    prev_args = args
-                end,
-                function(retval)
-                    local hook = custom_condition_evaluators[cond]
-                    if not hook then
-                        return retval
-                    end
-
-                    local old_retval = (sdk.to_int64(retval) & 1) == 1
-                    local new_retval = 
-                        hook.eval(
-                            hook.storage,
-                            sdk.to_managed_object(prev_args[2]), 
-                            sdk.to_managed_object(prev_args[3]), 
-                            old_retval
-                        )
-    
-                    --[[if sdk.to_int64(new_retval) ~= old_retval then
-                        log.debug("Condition changed by Lua!" .. " " .. string.format("%i->%i", old_retval, sdk.to_int64(new_retval)))
-                    else                  
-                        if sdk.to_int64(retval) == 1 then
-                            log.debug("Condition met!")
-                        else
-                            log.debug("Condition not met!")
-                        end
-                    end]]
-    
-                    return sdk.to_ptr(new_retval)
-                end
-            )
-        end
-    
-        add_evaluator()
-    end
-
-    hook.eval_str = eval_payload
-    hook.eval_init, hook.err = load(hook.eval_str)
-
-    if not hook.err then
-        hook.eval = hook.eval_init()
-    else
-        hook.eval = nil
-    end
-end
-
 local replace_condition_id_text = ""
 
 local function display_condition(tree, i, node, name, cond)
@@ -734,81 +493,7 @@ local function display_condition(tree, i, node, name, cond)
     end
 
     if imgui.tree_node(name) then
-        if not custom_condition_evaluators[cond] then
-            if imgui.button("Add Lua Driven Evaluator") then
-                add_condition_hook(cond)
-            end
-        else
-            imgui.text("Press CTRL+Enter for the changes to take effect.")
-
-            local hook = custom_condition_evaluators[cond]
-            local changed = false
-
-            local cursor_screen_pos = imgui.get_cursor_screen_pos()
-            changed, hook.eval_str = imgui.input_text_multiline("Evaluator", custom_condition_evaluators[cond].eval_str)
-
-            if imgui.begin_popup_context_item("evaluator_popup") then
-                if imgui.button("Remove Evaluator") then
-                    custom_condition_evaluators[cond] = nil
-                end
-
-                imgui.end_popup()
-            end
-
-            if not hook.eval_init or not hook.eval then
-                hook.eval_init, hook.err = load(hook.eval_str)
-
-                if not hook.err then
-                    hook.eval = hook.eval_init()
-                end
-            end
-    
-            if imgui.is_item_active() then
-                imgui.open_popup(tostring(cond) .. ": Evaluator")
-            end
-    
-            local last_input_width = imgui.calc_item_width()
-    
-            -- Causes the textbox to be overlayed on top of the existing textbox
-            -- because for some reason the textbox inside the node doesn't accept TAB input
-            -- however, the popup version does.
-            imgui.set_next_window_pos(cursor_screen_pos)
-    
-            if imgui.begin_popup(tostring(cond) .. ": Evaluator", (1 << 18) | (1 << 19)) then
-                
-                imgui.set_next_item_width(last_input_width)
-                changed, hook.eval_str, tstart, tend = imgui.input_text_multiline("Evaluator", hook.eval_str, {0,0}, (1 << 5) | (1 << 10) | (1 << 8))
-        
-                if changed then
-                    local err = nil
-                    hook.eval_init, hook.err = load(hook.eval_str)
-
-                    if not hook.err then
-                        hook.eval = hook.eval_init()
-                    end
-                end
-
-                if imgui.begin_popup_context_item("evaluator_popup2") then
-                    if imgui.button("Remove Evaluator") then
-                        custom_condition_evaluators[cond] = nil
-                    end
-    
-                    imgui.end_popup()
-                end
-        
-                imgui.end_popup()
-            end
-    
-    
-            --[[if changed then
-                local err = nil
-                custom_condition_evaluators[cond].eval, custom_condition_evaluators[cond].err = load(custom_condition_evaluators[cond].str)
-                
-            end]]
-            if hook.err then
-                imgui.text(hook.err)
-            end
-        end
+        HookManager:get(cond):display_hooks()
 
         if cond ~= nil then
             imgui.input_text("Address", string.format("%X", cond:get_address()))
@@ -2698,28 +2383,10 @@ local function save_tree(tree, filename)
             action_tbl.fields = {}
             action_tbl.properties = {}
 
-            if action_hooks.start[action] ~= nil then
-                action_tbl.start = {
-                    payload = action_hooks.start[action].payload
-                }
-            else
-                action_tbl.start = nil
-            end
+            local action_hook = HookManager:exists(action) and HookManager:get(action) or nil
 
-            if action_hooks.update[action] ~= nil then
-                action_tbl.update = {
-                    payload = action_hooks.update[action].payload
-                }
-            else
-                action_tbl.update = nil
-            end
-
-            if action_hooks["end"][action] ~= nil then
-                action_tbl["end"] = {
-                    payload = action_hooks["end"][action].payload
-                }
-            else
-                action_tbl["end"] = nil
+            if action_hook then
+                action_hook:serialize(action_tbl)
             end
             
             local t = action:get_type_definition()
@@ -2747,28 +2414,10 @@ local function save_tree(tree, filename)
             action_tbl.fields = {}
             action_tbl.properties = {}
 
-            if action_hooks.start[action] ~= nil then
-                action_tbl.start = {
-                    payload = action_hooks.start[action].payload
-                }
-            else
-                action_tbl.start = nil
-            end
+            local action_hook = HookManager:exists(action) and HookManager:get(action) or nil
 
-            if action_hooks.update[action] ~= nil then
-                action_tbl.update = {
-                    payload = action_hooks.update[action].payload
-                }
-            else
-                action_tbl.update = nil
-            end
-
-            if action_hooks["end"][action] ~= nil then
-                action_tbl["end"] = {
-                    payload = action_hooks["end"][action].payload
-                }
-            else
-                action_tbl["end"] = nil
+            if action_hook then
+                action_hook:serialize(action_tbl)
             end
 
             local t = action:get_type_definition()
@@ -2796,14 +2445,12 @@ local function save_tree(tree, filename)
             condition_tbl.fields = {}
             condition_tbl.properties = {}
 
-            if custom_condition_evaluators[condition] ~= nil then
-                condition_tbl.evaluator = {
-                    payload = custom_condition_evaluators[condition].eval_str
-                }
-            else
-                condition_tbl.evaluator = nil
+            local condition_hook = HookManager:exists(condition) and HookManager:get(condition) or nil
+
+            if condition_hook then
+                condition_hook:serialize(condition_tbl)
             end
-            
+
             local t = condition:get_type_definition()
 
             while t ~= nil do
@@ -2820,33 +2467,31 @@ local function save_tree(tree, filename)
     end
 
     for i=0, tree:get_static_condition_count()-1 do
-        local static_condition = tree:get_condition(i | (1 << 30))
+        local condition = tree:get_condition(i | (1 << 30))
 
-        if static_condition ~= nil then
-            local static_condition_tbl = {}
+        if condition ~= nil then
+            local condition_tbl = {}
 
-            static_condition_tbl.type = static_condition:get_type_definition():get_full_name()
-            static_condition_tbl.fields = {}
-            static_condition_tbl.properties = {}
+            condition_tbl.type = condition:get_type_definition():get_full_name()
+            condition_tbl.fields = {}
+            condition_tbl.properties = {}
 
-            if custom_condition_evaluators[static_condition] ~= nil then
-                static_condition_tbl.evaluator = {
-                    payload = custom_condition_evaluators[static_condition].eval_str
-                }
-            else
-                static_condition_tbl.evaluator = nil
+            local condition_hook = HookManager:exists(condition) and HookManager:get(condition) or nil
+
+            if condition_hook then
+                condition_hook:serialize(condition_tbl)
             end
             
-            local t = static_condition:get_type_definition()
+            local t = condition:get_type_definition()
 
             while t ~= nil do
-                make_fields(static_condition, t, static_condition_tbl.fields)
-                make_properties(static_condition, t, static_condition_tbl.properties)
+                make_fields(condition, t, condition_tbl.fields)
+                make_properties(condition, t, condition_tbl.properties)
 
                 t = t:get_parent_type()
             end
 
-            table.insert(out.tree_data.static_conditions, static_condition_tbl)
+            table.insert(out.tree_data.static_conditions, condition_tbl)
         else
             table.insert(out.tree_data.static_conditions, "NULL")
         end
@@ -3036,38 +2681,14 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
     end
 
     local on_add_condition = function(json_object, condition)
-        if json_object.evaluator ~= nil then
-            if json_object.evaluator.payload ~= nil then
-                log.debug("Loading condition evaluator payload for condition " .. condition:get_type_definition():get_full_name() .. "...")
-                log.debug("Payload: " .. tostring(json_object.evaluator.payload))
-                add_condition_hook(condition, json_object.evaluator.payload)
-            end
+        if not HookManager:get(condition):deserialize(json_object) then
+            HookManager:remove(condition)
         end
     end
 
     local on_add_action = function(json_object, action)
-        if json_object.start ~= nil then
-            if json_object.start.payload ~= nil then
-                log.debug("Loading action start payload for action " .. action:get_type_definition():get_full_name() .. "...")
-                log.debug("Payload: " .. tostring(json_object.start.payload))
-                add_action_start_hook(action, json_object.start.payload)
-            end
-        end
-
-        if json_object.update ~= nil then
-            if json_object.update.payload ~= nil then
-                log.debug("Loading action update payload for action " .. action:get_type_definition():get_full_name() .. "...")
-                log.debug("Payload: " .. tostring(json_object.update.payload))
-                add_action_update_hook(action, json_object.update.payload)
-            end
-        end
-
-        if json_object["end"] ~= nil then
-            if json_object["end"].payload ~= nil then
-                log.debug("Loading action end payload for action " .. action:get_type_definition():get_full_name() .. "...")
-                log.debug("Payload: " .. tostring(json_object["end"].payload))
-                add_action_end_hook(action, json_object["end"].payload)
-            end
+        if not HookManager:get(action):deserialize(json_object) then
+            HookManager:remove(action)
         end
     end
 
