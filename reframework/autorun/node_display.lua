@@ -418,6 +418,8 @@ local function display_event(tree, i, j, node, name, event)
     imgui.same_line()
     imgui.text(name)
     if made then
+        HookManager:get(event):display_hooks()
+
         if node ~= nil then
             if event ~= nil then
                 imgui.input_text("Address", string.format("%X", event:get_address()))
@@ -2506,6 +2508,12 @@ local function save_tree(tree, filename)
             transition_event_tbl.type = transition_event:get_type_definition():get_full_name()
             transition_event_tbl.fields = {}
             transition_event_tbl.properties = {}
+
+            local tevent_hook = HookManager:exists(transition_event) and HookManager:get(transition_event) or nil
+
+            if tevent_hook then
+                tevent_hook:serialize(transition_event_tbl)
+            end
             
             local t = transition_event:get_type_definition()
 
@@ -2692,11 +2700,17 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
         end
     end
 
+    local on_add_transition_event = function(json_object, transition_evnt)
+        if not HookManager:get(transition_evnt):deserialize(json_object) then
+            HookManager:remove(transition_evnt)
+        end
+    end
+
     load_objects("action", loaded_tree.actions, tree:get_actions(), on_add_action)
     load_objects("condition", loaded_tree.conditions, tree:get_conditions(), on_add_condition)
     load_objects("static action", loaded_tree.tree_data.static_actions, tree:get_data():get_static_actions(), on_add_action)
     load_objects("static condition", loaded_tree.tree_data.static_conditions, tree:get_data():get_static_conditions(), on_add_condition)
-    load_objects("transition event", loaded_tree.transition_events, tree:get_transitions())
+    load_objects("transition event", loaded_tree.transition_events, tree:get_transitions(), on_add_transition_event)
 
     load_integers("action method", loaded_tree.tree_data.action_methods, tree:get_data():get_action_methods())
     load_integers("static action method", loaded_tree.tree_data.static_action_methods, tree:get_data():get_static_action_methods())

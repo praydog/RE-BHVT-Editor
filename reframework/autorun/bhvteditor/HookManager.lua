@@ -1,11 +1,13 @@
 local ActionHook = require("bhvteditor/ActionHook")
 local ConditionHook = require("bhvteditor/ConditionHook")
+local TransitionEventHook = require("bhvteditor/TransitionEventHook")
 
 local HookManager = {
     hooks = {},
     hook_name_map = {
         ["via.behaviortree.Action"] = ActionHook,
         ["via.behaviortree.Condition"] = ConditionHook,
+        ["via.behaviortree.TransitionEvent"] = TransitionEventHook,
         -- todo: add more hook types 
     },
     storage = {},
