@@ -1570,23 +1570,40 @@ local function display_tree(core, tree)
                 end
             end,
             function(i, element)
-                local selectors = {}
                 local nodes = tree:get_nodes()
+
+                -- nodes are not pointers but rather full objects, so we can calculate the node size like this.
+                -- as an unfortunate side effect of them being full objects, we also need to
+                -- create a whole new array and copy the nodes over.
+                -- when we do this, we also need to bruteforce scan for old pointers to the 
+                -- previous node memory locations and replace them with the new ones.
+                local node_element_size = nodes[1]:as_memoryview():get_address() - nodes[0]:as_memoryview():get_address()
                 local nodes_start = nodes[0]:as_memoryview():get_address()
-                local nodes_end = nodes[nodes:size()]:as_memoryview():address()
-                --[[local element_size = (nodes[nodes:size()]:as_memoryview:address() - nodes_start) / nodes:size()
+                local nodes_end = nodes_start + (nodes:size() * node_element_size)
 
-                log.info("element_size: " .. string.format("%x", element_size))
-
-                for i=0, nodes:size()-1 do
-                    local node = tree:get_node(i)
-                    local selector = node:get_selector()
-                end]]
-
-                tree:get_nodes():push_back(tree:get_nodes()[i])
-                core:relocate(nodes_start, nodes_end, tree:get_data():get_nodes())
+                tree:get_nodes():emplace()
+                core:relocate(nodes_start, nodes_end, tree:get_nodes())
                 tree:get_nodes()[tree:get_nodes():size()-1] = tree:get_nodes()[i]:to_valuetype()
-                --tree:get_data():get_nodes():push_back(tree:get_data():get_nodes()[i])
+
+                -- The nodes themselves are now fixed at this point
+                -- But there's also the "node data" that's part of every node,
+                -- and is probably referenced by node index,
+                -- SO. We also need to expand THAT array in the same way.
+
+                local tree_data = tree:get_data()
+                local node_datas = tree_data:get_nodes() -- not the same as tree:get_nodes()
+                local node_data_element_size = node_datas[1]:as_memoryview():get_address() - node_datas[0]:as_memoryview():get_address()
+                local node_datas_start = node_datas[0]:as_memoryview():get_address()
+                local node_datas_end = node_datas_start + (node_datas:size() * node_data_element_size)
+                
+                tree_data:get_nodes():emplace()
+                core:relocate_datas(node_datas_start, node_datas_end, tree_data:get_nodes())
+                tree_data:get_nodes()[tree_data:get_nodes():size()-1] = tree_data:get_nodes()[i]:to_valuetype()
+
+                -- Now replace the data pointer in the node with the new one.
+                local last_tree_data = tree:get_data()[tree:get_data():size()-1]
+                local tree_nodes = tree:get_nodes()
+                tree_nodes[tree_nodes:size()-1]:as_memoryview():write_qword(8, last_tree_data:as_memoryview():address())
             end
         )
 
