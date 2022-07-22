@@ -2700,9 +2700,9 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
         end
     end
 
-    local on_add_transition_event = function(json_object, transition_evnt)
-        if not HookManager:get(transition_evnt):deserialize(json_object) then
-            HookManager:remove(transition_evnt)
+    local on_add_transition_event = function(json_object, transition_event)
+        if not HookManager:get(transition_event):deserialize(json_object) then
+            HookManager:remove(transition_event)
         end
     end
 
