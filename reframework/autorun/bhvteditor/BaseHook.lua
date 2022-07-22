@@ -174,7 +174,7 @@ function BaseHook:display(name)
 
             if imgui.begin_popup_context_item(metaname .. "_popup2") then
                 if imgui.button("Remove " .. metaname) then
-                    hook_tbl[obj] = nil
+                    hook_tbl.active = nil
                 end
 
                 imgui.end_popup()
