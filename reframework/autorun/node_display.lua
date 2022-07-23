@@ -987,6 +987,15 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 --end
             end
 
+            changed = imgui.button("Add Dummy Condition")
+
+            if changed then
+                first_times = {}
+
+                tree:get_conditions():push_back(sdk.create_instance("via.behaviortree.Condition"):add_ref_permanent())
+                transition_array:push_back(tree:get_condition_count() - 1)
+            end
+
             display_bhvt_array(tree, node, transition_array, tree.get_condition,
                 -- display predicate
                 function(tree, i, node, element)
@@ -1104,13 +1113,18 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 selection_map[tree][node:get_id()] = 1
             end
 
+            imgui.push_id(node_data:get_transition_events():as_memoryview():address())
+
             display_bhvt_array(tree, node, node_data:get_transition_events(), 
                 function(tree, x)
                     return x
                 end,
                 function(tree, i, node, element)
                     local evts = element
-                    local made = imgui.tree_node(tostring(i) .. " [" .. tostring(evts:size()) .. "]")
+                    local made = imgui.tree_node(tostring(i))
+
+                    imgui.same_line()
+                    imgui.text("[" .. tostring(evts:size()) .. "]")
 
                     imgui.same_line()
 
@@ -1139,6 +1153,15 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                             first_times = {}
             
                             evts:push_back(tonumber(add_event_id_text))
+                        end
+
+                        changed = imgui.button("Add Dummy TransitionEvent")
+
+                        if changed then
+                            first_times = {}
+            
+                            tree:get_transitions():push_back(sdk.create_instance("via.behaviortree.TransitionEvent"):add_ref_permanent())
+                            evts:push_back(tree:get_transition_count() - 1)
                         end
 
                         if evts:size() == 0 then
@@ -1190,6 +1213,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 end
             )
 
+            imgui.pop_id()
             imgui.tree_pop()
         end
 
