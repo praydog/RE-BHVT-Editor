@@ -2,6 +2,46 @@
 
 https://cursey.github.io/reframework-book/bhvt_editor/bhvt_editor.html
 
+## Saving/Loading of Trees at Runtime
+### ✅ Supported Tree Objects
+* Actions
+* Conditions
+* Transition Events
+
+### ✅ Supported Fields/Properties
+* Most primitive types (ints/enums/floats/etc...)
+* System.Guid
+* via.vec2/3/4
+
+### ❌ Not (yet) Supported Fields/Properties
+* Arrays/Lists (System.Array/System.Collections.Generic.List.*)
+* Pointers to other managed objects
+* Unknown ValueTypes
+
+### 🕘 Coming Soon
+* Saving/loading of new nodes (enlarging/shrinking the node array)
+
+## Lua Driven Objects
+These objects can be hooked to provide extended functionality that did not exist in the base game using Lua. 
+
+Optionally, dummy versions of them can be inserted to have completely unique functionality that is ran within Lua.
+
+### ✅ Supported Tree/Node Objects
+* Actions
+  * `start`
+    * Ran every time the node is ran, once
+  * `update`
+    * Ran every frame that the node is active
+  * `end`
+    * Ran every time the node ends/transitions to another state, once
+* Conditions
+  * `evaluate`
+    * Ran every frame that the node is active, returning `true` causes the node to transition into the condition's associated state
+* Transition Events
+  * `execute`
+    * Ran for specific transitions into another state, once
+    * Multiple transition events can run during a single transition
+
 ## Examples
 
 ### The UI
