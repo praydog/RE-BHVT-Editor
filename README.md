@@ -4,9 +4,9 @@ https://cursey.github.io/reframework-book/bhvt_editor/bhvt_editor.html
 
 ## Saving/Loading of Trees at Runtime
 ### ✅ Supported Tree Objects
-* Actions
-* Conditions
-* Transition Events
+* Actions (incl. custom Lua code)
+* Conditions (incl. custom Lua code)
+* Transition Events (incl. custom Lua code)
 
 ### ✅ Supported Fields/Properties
 * Most primitive types (ints/enums/floats/etc...)
