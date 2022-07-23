@@ -1601,9 +1601,69 @@ local function display_tree(core, tree)
                 tree_data:get_nodes()[tree_data:get_nodes():size()-1] = tree_data:get_nodes()[i]:to_valuetype()
 
                 -- Now replace the data pointer in the node with the new one.
-                local last_tree_data = tree:get_data()[tree:get_data():size()-1]
+                local last_tree_data = tree_data:get_nodes()[tree_data:get_nodes():size()-1]
                 local tree_nodes = tree:get_nodes()
                 tree_nodes[tree_nodes:size()-1]:as_memoryview():write_qword(8, last_tree_data:as_memoryview():address())
+
+                -- Now the node should be set up (mostly), we just need to fix
+                -- all of the arrays inside the node now, by creating completely new arrays
+                -- as it stands, all of the memory is copied 1:1 from the original node
+                -- but because of that, we need to also duplicate the arrays.
+                node_datas = tree_data:get_nodes()
+                local old_node_data = node_datas[i]
+                local new_node_data = node_datas[node_datas:size()-1]
+
+                local basic_arrays = {
+                    "children",
+                    "actions",
+                    "states",
+                    "states_2",
+                    "start_states",
+                    "start_transitions",
+                    "conditions",
+                    "transition_conditions",
+                    "transition_attributes",
+                    "tags"
+                }
+
+                -- These arrays are just arrays of integers
+                -- so we can wipe the new array and just copy the values over to the new one (after allocation)
+                for _, array_name in pairs(basic_arrays) do
+                    log.debug(array_name)
+
+                    local old_array = old_node_data["get_" .. array_name](old_node_data)
+                    local new_array = new_node_data["get_" .. array_name](new_node_data)
+
+                    new_array:as_memoryview():wipe() -- does not delete the memory, just calls memset(0) on it
+                    
+                    for i=0, old_array:size()-1 do
+                        new_array:emplace()
+                        new_array[new_array:size()-1] = old_array[i]
+                    end
+                end
+
+                -- arrays of arrays
+                local complicated_arrays = {
+                    "transition_events"
+                }
+
+                -- the value of arr[i] is another array
+                -- but arr[i][j] is an actual integer we can just copy over
+                for _, array_name in pairs(complicated_arrays) do
+                    local old_array = old_node_data["get_" .. array_name](old_node_data)
+                    local new_array = new_node_data["get_" .. array_name](new_node_data)
+
+                    new_array:as_memoryview():wipe() -- does not delete the memory, just calls memset(0) on it
+                    
+                    for i=0, old_array:size()-1 do
+                        new_array:emplace()
+                        
+                        for j=0, old_array[i]:size()-1 do
+                            new_array[i]:emplace()
+                            new_array[i][j] = old_array[i][j]
+                        end
+                    end
+                end
             end
         )
 
