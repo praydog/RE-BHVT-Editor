@@ -3370,11 +3370,11 @@ local function draw_stupid_editor(name)
 
             -- Tree overview
             if layer ~= nil and tree ~= nil then
-                if imgui.begin_child_window("Tree", Vector2f.new(SIDEBAR_BASE_WIDTH, ws.y - 50), true) then
+                --if imgui.begin_child_window("Tree", Vector2f.new(SIDEBAR_BASE_WIDTH, ws.y - 100), true) then
                     last_layer = layer
                     display_internal_handle_body(layer, tree, 0)
-                    imgui.end_child_window()
-                end
+                    --imgui.end_child_window()
+                --end
             end
 
             was_hovering_sidebar = imgui.is_item_hovered((1 << 5))
