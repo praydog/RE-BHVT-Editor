@@ -37,6 +37,20 @@ local ImGuiStyleVar =
     ImGuiStyleVar_COUNT=24
 };
 
+local basic_node_arrays = {
+    "children",
+    "actions",
+    "states",
+    "states_2",
+    "start_states",
+    "start_transitions",
+    "conditions",
+    "transition_conditions",
+    "transition_attributes",
+    "transition_ids",
+    "tags"
+}
+
 local cached_node_names = {}
 local cached_node_indices = {}
 
@@ -1613,22 +1627,9 @@ local function display_tree(core, tree)
                 local old_node_data = node_datas[i]
                 local new_node_data = node_datas[node_datas:size()-1]
 
-                local basic_arrays = {
-                    "children",
-                    "actions",
-                    "states",
-                    "states_2",
-                    "start_states",
-                    "start_transitions",
-                    "conditions",
-                    "transition_conditions",
-                    "transition_attributes",
-                    "tags"
-                }
-
                 -- These arrays are just arrays of integers
                 -- so we can wipe the new array and just copy the values over to the new one (after allocation)
-                for _, array_name in pairs(basic_arrays) do
+                for _, array_name in pairs(basic_node_arrays) do
                     log.debug(array_name)
 
                     local old_array = old_node_data["get_" .. array_name](old_node_data)
@@ -1638,7 +1639,7 @@ local function display_tree(core, tree)
                     
                     for i=0, old_array:size()-1 do
                         new_array:emplace()
-                        new_array[new_array:size()-1] = old_array[i]
+                        new_array[i] = old_array[i]
                     end
                 end
 
@@ -2323,53 +2324,26 @@ local function save_tree(tree, filename)
 
     local make_node = function(node)
         local tbl = {}
-
-        local node_actions = node:get_data():get_actions()
-        local node_transition_conditions = node:get_data():get_transition_conditions()
-        local node_states = node:get_data():get_states()
-        local node_states_2 = node:get_data():get_states_2()
-        local node_start_states = node:get_data():get_start_states()
-        local node_transition_ids = node:get_data():get_transition_ids()
-        local node_transition_attributes = node:get_data():get_transition_attributes()
-        local node_transition_events = node:get_data():get_transition_events()
-
-        tbl.actions = {}
-        tbl.transition_conditions = {}
-        tbl.states = {}
-        tbl.states_2 = {}
-        tbl.start_states = {}
-        tbl.transition_ids = {}
-        tbl.transition_attributes = {}
         tbl.transition_events = {}
         tbl.name = get_node_full_name(node)
+        tbl.id = node:get_id()
 
-        for i=0, node_actions:size()-1 do
-            table.insert(tbl.actions, node_actions[i])
+        local node_data = node:get_data()
+
+        for _, array_name in pairs(basic_node_arrays) do
+            local arr = node_data["get_" .. array_name](node_data)
+            tbl[array_name] = {}
+
+            if arr:size() ~= 0 then
+                for i=0, arr:size()-1 do
+                    table.insert(tbl[array_name], arr[i])
+                end
+            else
+                tbl[array_name] = "NULL" -- because the JSON data gets interpreted as "null" if it's empty, we need to be explicit about it
+            end
         end
 
-        for i=0, node_transition_conditions:size()-1 do
-            table.insert(tbl.transition_conditions, node_transition_conditions[i])
-        end
-
-        for i=0, node_states:size()-1 do
-            table.insert(tbl.states, node_states[i])
-        end
-
-        for i=0, node_states_2:size()-1 do
-            table.insert(tbl.states_2, node_states_2[i])
-        end
-
-        for i=0, node_start_states:size()-1 do
-            table.insert(tbl.start_states, node_start_states[i])
-        end
-
-        for i=0, node_transition_ids:size()-1 do
-            table.insert(tbl.transition_ids, node_transition_ids[i])
-        end
-
-        for i=0, node_transition_attributes:size() - 1 do
-            table.insert(tbl.transition_attributes, node_transition_attributes[i])
-        end
+        local node_transition_events = node:get_data():get_transition_events()
 
         for i=0, node_transition_events:size() - 1 do
             local evts = node_transition_events[i]
@@ -2794,7 +2768,7 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
 
     local increase_node_array_size = function(node_name, metaname, json_objects, tree_objects)
         if json_objects == nil or json_objects == "NULL" then
-            if tree_objects ~= nil and tree_objects:size() > 0 then
+            if tree_objects ~= nil and tree_objects:size() > 0 and json_objects == "NULL" then -- ONLY WHEN IT'S "NULL" IS THE ARRAY EMPTY!!! ALLOWS BACKWARDS COMPATIBILITY WITH OLDER JSON FILES WHERE SOME KEYS WERE MISSING.
                 log.debug("Current node "  .. node_name .. " has " .. metaname .. " object array that should be empty. Emptying array...")
 
                 while tree_objects:size() ~= 0 do
@@ -2835,15 +2809,6 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
         end
     end
 
-    --[[tbl.actions = {}
-    tbl.transition_conditions = {}
-    tbl.states = {}
-    tbl.states_2 = {}
-    tbl.start_states = {}
-    tbl.transition_ids = {}
-    tbl.transition_attributes = {}
-    tbl.transition_events = {}]]
-    
     if #loaded_tree.nodes ~= tree:get_node_count() then
         log.debug("Saved tree has " .. tostring(#loaded_tree.nodes) .. " nodes, but the current tree has " .. tostring(tree:get_node_count()) .. " nodes. Node resizing is not yet supported.")
     end
@@ -2851,13 +2816,14 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
     for i, node_json in ipairs(loaded_tree.nodes) do
         local tree_node = tree:get_node(i-1)
         local node_name = tostring(i-1) .. ": " .. node_json.name
-        load_node_integers(node_name, "action", node_json.actions, tree_node:get_data():get_actions())
-        load_node_integers(node_name, "transition condition", node_json.transition_conditions, tree_node:get_data():get_transition_conditions())
-        load_node_integers(node_name, "state", node_json.states, tree_node:get_data():get_states())
-        load_node_integers(node_name, "state 2", node_json.states_2, tree_node:get_data():get_states_2())
-        load_node_integers(node_name, "start state", node_json.start_states, tree_node:get_data():get_start_states())
-        load_node_integers(node_name, "transition id", node_json.transition_ids, tree_node:get_data():get_transition_ids())
-        load_node_integers(node_name, "transition attribute", node_json.transition_attributes, tree_node:get_data():get_transition_attributes())
+        local node_data = tree_node:get_data()
+
+        for _, array_name in pairs(basic_node_arrays) do
+            local arr = node_data["get_" .. array_name](node_data)
+            local j = node_json[array_name]
+
+            load_node_integers(node_name, array_name, j, arr)
+        end
 
         if increase_node_array_size(node_name, "transition event", node_json.transition_events, tree_node:get_data():get_transition_events()) then
             for j, json_evts in ipairs(node_json.transition_events) do
