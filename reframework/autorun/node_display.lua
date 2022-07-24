@@ -709,6 +709,7 @@ end
 
 local transition_state_id_text = "0"
 local replace_node_id_text = "0"
+local edit_node_id_text = "0"
 local add_action_id_text = "0"
 local add_event_id_text = "0"
 
@@ -767,8 +768,20 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
         end
 
         --imgui.text("Full name: " .. get_node_full_name(node))
-        imgui.text("ID: " .. node:get_id())
-        --imgui.text("Status: " .. node:get_status1())
+        --imgui.text("ID: " .. node:get_id())
+
+        changed, edit_node_id_text = imgui.input_text("Node ID", tostring(node:get_id()), 1 << 5)
+
+        if changed then
+            node:as_memoryview():write_qword(0, tonumber(edit_node_id_text))
+            node:get_data():as_memoryview():write_dword(0, tonumber(edit_node_id_text))
+        end
+
+        if node:get_selector() == nil and imgui.button("Add Selector") then
+            local selector = sdk.create_instance("via.behaviortree.SelectorFSM"):add_ref_permanent()
+
+            node:as_memoryview():write_qword(0x20, selector:get_address())
+        end
 
         if cond ~= nil then 
             display_condition(tree, node_array_idx, node, cond:get_type_definition():get_full_name(), cond)
