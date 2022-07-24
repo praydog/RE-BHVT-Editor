@@ -712,6 +712,7 @@ local replace_node_id_text = "0"
 local edit_node_id_text = "0"
 local add_action_id_text = "0"
 local add_event_id_text = "0"
+local add_child_id_text = "0"
 
 local queued_editor_id_move = nil
 
@@ -788,6 +789,44 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
         end
 
         if imgui.tree_node("Children") then
+            changed, add_child_id_text = imgui.input_text("Add Child by ID", add_child_id_text, 1 << 5)
+
+            if changed then
+                local target_node = tree:get_node(tonumber(add_child_id_text))
+
+                if target_node ~= nil then
+                    local target_parent = target_node:get_parent()
+
+                    -- Set the target node's parent to this node.
+                    if target_parent ~= nil then
+                        for offset=0, target_node:as_memoryview().size-8, 8 do
+                            local ptr = target_node:as_memoryview():read_qword(offset)
+
+                            if ptr == target_parent:as_memoryview():get_address() then
+                                target_node:as_memoryview():write_qword(offset, node:as_memoryview():get_address())
+                                log.debug("Successfully replaced parent pointer of node " .. target_node:get_id() .. " with " .. node:get_id())
+                                break
+                            end
+                        end
+                    end
+
+                    -- Do it again but do it within the node's data structure.
+                    for i=0, tree:get_node_count()-1 do
+                        local test_node = tree:get_node(i)
+            
+                        if test_node == node then
+                            target_node:get_data().parent = i
+                            log.debug("Successfully replaced parent index of node (data) " .. target_node:get_id() .. " with " .. i)
+                            break
+                        end
+                    end
+
+                    node_data:get_children():push_back(tonumber(add_child_id_text))
+                else
+                    re.msg("Node with ID " .. add_child_id_text .. " not found, cannot add child.")
+                end
+            end
+
             display_bhvt_array(tree, node, node_data:get_children(), tree.get_node, 
                 function(tree, i, node, element)
                     display_node(tree, element, node_data:get_children(), i)
