@@ -209,6 +209,16 @@ local function create_new_node(core, tree, i)
     local tree_nodes = tree:get_nodes()
     tree_nodes[tree_nodes:size()-1]:as_memoryview():write_qword(8, last_tree_data:as_memoryview():address())
 
+    -- If not copying from a node, set the node attributes to enabled and FSM node.
+    -- We also need to set the pointer to the tree owner.
+    if i == nil then
+        last_tree_data:as_memoryview():write_dword(0x8, 1 | 2 | 0x20) -- enabled | restartable | FSM node
+
+        local last_tree_node = tree_nodes[tree_nodes:size()-1]
+        last_tree_node:as_memoryview():write_short(0x18, 1 | 2 | 0x20) -- enabled | restartable | FSM node
+        last_tree_node:as_memoryview():write_qword(0x10, tree:as_memoryview():address())
+    end
+
     -- Now the node should be set up (mostly), we just need to fix
     -- all of the arrays inside the node now, by creating completely new arrays
     -- as it stands, all of the memory is copied 1:1 from the original node
