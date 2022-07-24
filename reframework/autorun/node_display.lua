@@ -2719,7 +2719,7 @@ local function save_tree(tree, filename)
     json.dump_file(filename, out)
 end
 
-local function load_tree(tree, filename) -- tree is being written to in this instance.
+local function load_tree(layer, tree, filename) -- tree is being written to in this instance.
     if not filename then filename = "bhvteditor/saved_tree.json" end
     first_times = {}
 
@@ -2731,7 +2731,7 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
     end
 
     if #loaded_tree.nodes ~= tree:get_node_count() then
-        re.msg("Saved tree has different number of nodes than current tree.\nResizing of nodes is not yet supported.\nBugs may occur")
+        re.msg("Saved tree has different number of nodes than the current tree. This is supported but is still a work in progress.")
     end
 
     local assign_fields = function(obj, t, fields)
@@ -2945,7 +2945,15 @@ local function load_tree(tree, filename) -- tree is being written to in this ins
     end
 
     if #loaded_tree.nodes ~= tree:get_node_count() then
-        log.debug("Saved tree has " .. tostring(#loaded_tree.nodes) .. " nodes, but the current tree has " .. tostring(tree:get_node_count()) .. " nodes. Node resizing is not yet supported.")
+        log.debug("Saved tree has " .. tostring(#loaded_tree.nodes) .. " nodes, but the current tree has " .. tostring(tree:get_node_count()) .. " nodes.")
+    end
+
+    -- Attempt to enlarge the node array.
+    if #loaded_tree.nodes > tree:get_node_count() then
+        while #loaded_tree.nodes > tree:get_node_count() do
+            log.debug("Adding new node.")
+            create_new_node(layer, tree)
+        end
     end
 
     for i, node_json in ipairs(loaded_tree.nodes) do
@@ -3094,7 +3102,7 @@ local function draw_stupid_editor(name)
                     imgui.text("Load")
                     imgui.same_line()
                     if imgui.button(file) then
-                        load_tree(tree, file)
+                        load_tree(layer, tree, file)
                     end
                 end
 

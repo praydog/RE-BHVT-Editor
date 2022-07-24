@@ -18,8 +18,8 @@ https://cursey.github.io/reframework-book/bhvt_editor/bhvt_editor.html
 * Pointers to other managed objects
 * Unknown ValueTypes
 
-### 🕘 Coming Soon
-* Saving/loading of new nodes (enlarging/shrinking the node array)
+~~### 🕘 Coming Soon~~ Added
+* Saving/loading of new nodes (enlarging/~~shrinking~~ the node array)
 
 ## Lua Driven Objects
 These objects can be hooked to provide extended functionality that did not exist in the base game using Lua. 
