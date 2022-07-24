@@ -141,6 +141,124 @@ re.on_config_save(function()
     json.dump_file(cfg_path, cfg)
 end)
 
+-- i can be nil, it doesn't need to copy from a node.
+local function create_new_node(core, tree, i)
+    recreate_globals()
+
+    local nodes = tree:get_nodes()
+
+    -- nodes are not pointers but rather full objects, so we can calculate the node size like this.
+    -- as an unfortunate side effect of them being full objects, we also need to
+    -- create a whole new array and copy the nodes over.
+    -- when we do this, we also need to bruteforce scan for old pointers to the 
+    -- previous node memory locations and replace them with the new ones.
+    local node_element_size = nodes[1]:as_memoryview():get_address() - nodes[0]:as_memoryview():get_address()
+    local nodes_start = nodes[0]:as_memoryview():get_address()
+    local nodes_end = nodes_start + (nodes:size() * node_element_size)
+
+    tree:get_nodes():emplace()
+    core:relocate(nodes_start, nodes_end, tree:get_nodes())
+
+    if i ~= nil then
+        -- Copy the raw node data to the new node.
+        local from_node = tree:get_nodes()[i]
+        tree:get_nodes()[tree:get_nodes():size()-1] = from_node:to_valuetype()
+
+        -- Create a new selector object based on the one that's in the node we copied from.
+        local selector = from_node:get_selector()
+        if selector ~= nil then
+            log.debug("Adding selector to new node")
+
+            local selector_t = selector:get_type_definition()
+            local new_selector = selector_t:create_instance():add_ref_permanent()
+
+            for j=0, from_node:as_memoryview().size-8, 8 do
+                local ptr = from_node:as_memoryview():read_qword(j)
+
+                if ptr == selector:get_address() then
+                    log.debug(string.format("Found selector pointer at %x", j))
+                    last_node:as_memoryview():write_qword(j, new_selector:get_address())
+                    break
+                end
+            end
+        else
+            log.debug("No selector to add")
+        end
+    end
+
+    -- The nodes themselves are now fixed at this point
+    -- But there's also the "node data" that's part of every node,
+    -- and is probably referenced by node index,
+    -- SO. We also need to expand THAT array in the same way.
+
+    local tree_data = tree:get_data()
+    local node_datas = tree_data:get_nodes() -- not the same as tree:get_nodes()
+    local node_data_element_size = node_datas[1]:as_memoryview():get_address() - node_datas[0]:as_memoryview():get_address()
+    local node_datas_start = node_datas[0]:as_memoryview():get_address()
+    local node_datas_end = node_datas_start + (node_datas:size() * node_data_element_size)
+    
+    tree_data:get_nodes():emplace()
+    core:relocate_datas(node_datas_start, node_datas_end, tree_data:get_nodes())
+
+    if i ~= nil then
+        tree_data:get_nodes()[tree_data:get_nodes():size()-1] = tree_data:get_nodes()[i]:to_valuetype()
+    end
+
+    -- Now replace the data pointer in the node with the new one.
+    local last_tree_data = tree_data:get_nodes()[tree_data:get_nodes():size()-1]
+    local tree_nodes = tree:get_nodes()
+    tree_nodes[tree_nodes:size()-1]:as_memoryview():write_qword(8, last_tree_data:as_memoryview():address())
+
+    -- Now the node should be set up (mostly), we just need to fix
+    -- all of the arrays inside the node now, by creating completely new arrays
+    -- as it stands, all of the memory is copied 1:1 from the original node
+    -- but because of that, we need to also duplicate the arrays.
+    if i ~= nil then
+        node_datas = tree_data:get_nodes()
+        local old_node_data = node_datas[i]
+        local new_node_data = node_datas[node_datas:size()-1]
+
+        -- These arrays are just arrays of integers
+        -- so we can wipe the new array and just copy the values over to the new one (after allocation)
+        for _, array_name in pairs(basic_node_arrays) do
+            log.debug(array_name)
+
+            local old_array = old_node_data["get_" .. array_name](old_node_data)
+            local new_array = new_node_data["get_" .. array_name](new_node_data)
+
+            new_array:as_memoryview():wipe() -- does not delete the memory, just calls memset(0) on it
+            
+            for i=0, old_array:size()-1 do
+                new_array:emplace()
+                new_array[i] = old_array[i]
+            end
+        end
+
+        -- arrays of arrays
+        local complicated_arrays = {
+            "transition_events"
+        }
+
+        -- the value of arr[i] is another array
+        -- but arr[i][j] is an actual integer we can just copy over
+        for _, array_name in pairs(complicated_arrays) do
+            local old_array = old_node_data["get_" .. array_name](old_node_data)
+            local new_array = new_node_data["get_" .. array_name](new_node_data)
+
+            new_array:as_memoryview():wipe() -- does not delete the memory, just calls memset(0) on it
+            
+            for i=0, old_array:size()-1 do
+                new_array:emplace()
+                
+                for j=0, old_array[i]:size()-1 do
+                    new_array[i]:emplace()
+                    new_array[i][j] = old_array[i][j]
+                end
+            end
+        end
+    end
+end
+
 local function duplicate_managed_object_in_array(arr, i)
     first_times = {}
 
@@ -1647,7 +1765,6 @@ local function display_tree(core, tree)
         imgui.tree_pop()
     end]]
 
-
     ------------------------------------
     ---------- TREE NODES --------------
     ------------------------------------
@@ -1656,6 +1773,10 @@ local function display_tree(core, tree)
     imgui.text(" [" .. tostring(tree:get_nodes():size()) .. "]")
 
     if made then
+        if imgui.button("Add new node") then
+            create_new_node(core, tree, nil)
+        end
+
         display_bhvt_array(tree, node, tree:get_nodes(), 
             function(tree, x) 
                 return x
@@ -1668,87 +1789,7 @@ local function display_tree(core, tree)
                 end
             end,
             function(i, element)
-                local nodes = tree:get_nodes()
-
-                -- nodes are not pointers but rather full objects, so we can calculate the node size like this.
-                -- as an unfortunate side effect of them being full objects, we also need to
-                -- create a whole new array and copy the nodes over.
-                -- when we do this, we also need to bruteforce scan for old pointers to the 
-                -- previous node memory locations and replace them with the new ones.
-                local node_element_size = nodes[1]:as_memoryview():get_address() - nodes[0]:as_memoryview():get_address()
-                local nodes_start = nodes[0]:as_memoryview():get_address()
-                local nodes_end = nodes_start + (nodes:size() * node_element_size)
-
-                tree:get_nodes():emplace()
-                core:relocate(nodes_start, nodes_end, tree:get_nodes())
-                tree:get_nodes()[tree:get_nodes():size()-1] = tree:get_nodes()[i]:to_valuetype()
-
-                -- The nodes themselves are now fixed at this point
-                -- But there's also the "node data" that's part of every node,
-                -- and is probably referenced by node index,
-                -- SO. We also need to expand THAT array in the same way.
-
-                local tree_data = tree:get_data()
-                local node_datas = tree_data:get_nodes() -- not the same as tree:get_nodes()
-                local node_data_element_size = node_datas[1]:as_memoryview():get_address() - node_datas[0]:as_memoryview():get_address()
-                local node_datas_start = node_datas[0]:as_memoryview():get_address()
-                local node_datas_end = node_datas_start + (node_datas:size() * node_data_element_size)
-                
-                tree_data:get_nodes():emplace()
-                core:relocate_datas(node_datas_start, node_datas_end, tree_data:get_nodes())
-                tree_data:get_nodes()[tree_data:get_nodes():size()-1] = tree_data:get_nodes()[i]:to_valuetype()
-
-                -- Now replace the data pointer in the node with the new one.
-                local last_tree_data = tree_data:get_nodes()[tree_data:get_nodes():size()-1]
-                local tree_nodes = tree:get_nodes()
-                tree_nodes[tree_nodes:size()-1]:as_memoryview():write_qword(8, last_tree_data:as_memoryview():address())
-
-                -- Now the node should be set up (mostly), we just need to fix
-                -- all of the arrays inside the node now, by creating completely new arrays
-                -- as it stands, all of the memory is copied 1:1 from the original node
-                -- but because of that, we need to also duplicate the arrays.
-                node_datas = tree_data:get_nodes()
-                local old_node_data = node_datas[i]
-                local new_node_data = node_datas[node_datas:size()-1]
-
-                -- These arrays are just arrays of integers
-                -- so we can wipe the new array and just copy the values over to the new one (after allocation)
-                for _, array_name in pairs(basic_node_arrays) do
-                    log.debug(array_name)
-
-                    local old_array = old_node_data["get_" .. array_name](old_node_data)
-                    local new_array = new_node_data["get_" .. array_name](new_node_data)
-
-                    new_array:as_memoryview():wipe() -- does not delete the memory, just calls memset(0) on it
-                    
-                    for i=0, old_array:size()-1 do
-                        new_array:emplace()
-                        new_array[i] = old_array[i]
-                    end
-                end
-
-                -- arrays of arrays
-                local complicated_arrays = {
-                    "transition_events"
-                }
-
-                -- the value of arr[i] is another array
-                -- but arr[i][j] is an actual integer we can just copy over
-                for _, array_name in pairs(complicated_arrays) do
-                    local old_array = old_node_data["get_" .. array_name](old_node_data)
-                    local new_array = new_node_data["get_" .. array_name](new_node_data)
-
-                    new_array:as_memoryview():wipe() -- does not delete the memory, just calls memset(0) on it
-                    
-                    for i=0, old_array:size()-1 do
-                        new_array:emplace()
-                        
-                        for j=0, old_array[i]:size()-1 do
-                            new_array[i]:emplace()
-                            new_array[i][j] = old_array[i][j]
-                        end
-                    end
-                end
+                create_new_node(core, tree, i)
             end
         )
 
@@ -3099,11 +3140,11 @@ local function draw_stupid_editor(name)
 
                             if not cfg.search_allow_duplicates then
                                 if not last_search_results_set[get_node_full_name(node)] then
-                                    table.insert(last_search_results_node, node)
+                                    table.insert(last_search_results_node, { ["i"] = i, ["node"] = node })
                                     last_search_results_set[get_node_full_name(node)] = true
                                 end
                             else
-                                table.insert(last_search_results_node, node)
+                                table.insert(last_search_results_node, { ["i"] = i, ["node"] = node })
                             end
                         end
 
@@ -3257,7 +3298,7 @@ local function draw_stupid_editor(name)
                 -- Display a tooltip instead of a popup.
                 imgui.begin_tooltip()
                     for i, node in ipairs(last_search_results_node) do
-                        display_node(tree, node)
+                        display_node(tree, node.node, tree:get_nodes(), node.i)
                     end
 
                     for i, cond in ipairs(last_search_results_condition) do
@@ -3272,7 +3313,11 @@ local function draw_stupid_editor(name)
 
             if imgui.begin_popup("Search_Results_Name") then
                 for i, node in ipairs(last_search_results_node) do
-                    display_node(tree, node)
+                    if imgui.button("Dupe") then
+                        create_new_node(layer, tree, node.i)
+                    end
+                    imgui.same_line()
+                    display_node(tree, node.node, tree:get_nodes(), node.i)
                 end
     
                 for i, cond in ipairs(last_search_results_condition) do
