@@ -869,17 +869,6 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 node_data:get_actions():push_back(tonumber(add_action_id_text))
             end
 
-            changed = imgui.button("Add Dummy Action")
-
-            if changed then
-                first_times = {}
-
-                tree:get_actions():push_back(sdk.create_instance("via.behaviortree.Action"):add_ref_permanent())
-                tree:get_data():get_action_methods():push_back(1 | 2 | 4 | 8 | 16 | 32)
-
-                node_data:get_actions():push_back(tree:get_action_count() - 1)
-            end
-
             changed, selection = imgui.combo("Copy from", selection, node_names[tree])
 
             if changed then
@@ -901,6 +890,25 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                         end
                     end
                 --end
+            end
+
+            changed = imgui.button("Add Dummy Action")
+
+            if changed then
+                first_times = {}
+
+                tree:get_actions():push_back(sdk.create_instance("via.behaviortree.Action"):add_ref_permanent())
+                tree:get_data():get_action_methods():push_back(1 | 2 | 4 | 8 | 16 | 32)
+
+                node_data:get_actions():push_back(tree:get_action_count() - 1)
+            end
+
+            imgui.same_line()
+
+            if imgui.button("Clear Actions") then
+                first_times = {}
+
+                node_data:get_actions():clear()
             end
 
             display_bhvt_array(tree, node, node_data:get_actions(), tree.get_action, 
