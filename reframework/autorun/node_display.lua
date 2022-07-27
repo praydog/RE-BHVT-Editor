@@ -422,6 +422,11 @@ local function get_localplayer()
         if player_comp == nil then return nil end
 
         return player_comp:call("get_GameObject")
+    elseif gn == "re8" then
+        local props_manager = sdk.get_managed_singleton(sdk.game_namespace("PropsManager"))
+        if props_manager == nil then return nil end
+
+        return props_manager:get_Player()
     end
 
     return nil
