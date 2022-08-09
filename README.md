@@ -50,6 +50,9 @@ Optionally, dummy versions of them can be inserted to have completely unique fun
 ### The UI
 https://user-images.githubusercontent.com/2909949/178182705-7f4e31bb-9be4-4a9f-8a9e-951a9668da32.mp4
 
+### Experimenting with recreating Vergil's Moveset in MHR
+https://user-images.githubusercontent.com/2909949/183736888-d719c120-d7e4-4652-9ef2-45257e8e35c4.mp4
+
 ### Using Lua driven condition evaluators to run on-hit effects for all child nodes
 https://user-images.githubusercontent.com/2909949/178722895-0c521cc6-004f-4ef9-9133-39112cfdf7f6.mp4
 
