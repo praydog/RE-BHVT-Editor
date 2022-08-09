@@ -2,6 +2,9 @@
 
 https://cursey.github.io/reframework-book/bhvt_editor/bhvt_editor.html
 
+## Initial warning
+This is very work-in-progress. It requires the [behaviortrees-fsm](https://github.com/praydog/REFramework/tree/behaviortrees-fsm) branch of REFramework to function. This can be compiled manually or a build of it can be downloaded from the [Actions](https://github.com/praydog/REFramework/actions) page of REFramework.
+
 ## Saving/Loading of Trees at Runtime
 ### ✅ Supported Tree Objects
 * Actions (including custom Lua code)
