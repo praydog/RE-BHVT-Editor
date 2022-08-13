@@ -2963,6 +2963,12 @@ local function load_tree(layer, tree, filename) -- tree is being written to in t
 
     for i, node_json in ipairs(loaded_tree.nodes) do
         local tree_node = tree:get_node(i-1)
+
+        if node_json.id ~= nil then
+            tree_node:as_memoryview():write_qword(0, node_json.id)
+            tree_node:get_data():as_memoryview():write_dword(0, node_json.id)
+        end
+
         local node_name = tostring(i-1) .. ": " .. node_json.name
         local node_data = tree_node:get_data()
 
