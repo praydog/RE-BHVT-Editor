@@ -69,7 +69,97 @@ local node_names = {}
 local first_times = {}
 local sort_dict = {}
 
+local custom_tree = {
+    {
+        name = "root",
+        children = { 2, 3, 4, 5 }
+    },
+    {
+        name = "node2",
+        children = { 21 }
+    },
+    {
+        name = "node3",
+        children = {}
+    },
+    {
+        name = "node4",
+        children = { 10, 11, 12, 13 }
+    },
+    {
+        name = "node5",
+        children = { 6, 7, 8, 9, 16, 17 }
+    },
+    {
+        name = "node6",
+        children = {}
+    },
+    {
+        name = "node7",
+        children = { 15, 18 }
+    },
+    {
+        name = "node8",
+        children = {}
+    },
+    {
+        name = "node9",
+        children = {}
+    },
+    {
+        name = "node10",
+        children = {}
+    },
+    {
+        name = "node11",
+        children = {}
+    },
+    {
+        name = "node12",
+        children = {}
+    },
+    {
+        name = "node13",
+        children = {}
+    },
+    {
+        name = "node14",
+        children = {}
+    },
+    {
+        name = "node15",
+        children = { 14 }
+    },
+    {
+        name = "node16",
+        children = {  }
+    },
+    {
+        name = "node17",
+        children = {  }
+    },
+    {
+        name = "node18",
+        children = { 19, 20 }
+    },
+    {
+        name = "node19",
+        children = {  }
+    },
+    {
+        name = "node20",
+        children = {  }
+    },
+    {
+        name = "node21",
+        children = {  }
+    }
+}
+
 local function recreate_globals()
+    custom_tree = {}
+    cached_node_names = {}
+    cached_node_indices = {}
     action_map = {}
     action_name_map = {}
     event_map = {}
@@ -891,11 +981,19 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
     if made_node then
         local node_data = node:get_data()
 
+        local changed, new_node_name = imgui.input_text("Change Name", node:get_name(), 1 << 5)
+
+        if changed then
+            recreate_globals()
+            node:set_name(new_node_name)
+            node_data:set_name(new_node_name)
+        end
+
         imgui.input_text("Address", string.format("%X", node:as_memoryview():get_address()))
 
         display_node_replacement("Replace Node", tree, node, node_array, node_array_idx)
 
-        local changed, replace_node_id_text = imgui.input_text("Replace Node ID by ID", replace_node_id_text, 1 << 5)
+        changed, replace_node_id_text = imgui.input_text("Replace Node ID by ID", replace_node_id_text, 1 << 5)
         
         if changed then
             node_array[node_array_idx] = tonumber(replace_node_id_text)
@@ -2008,93 +2106,6 @@ local function draw_standard_node(name, custom_id, render_after_cb)
     return out
 end
 
-local custom_tree = {
-    {
-        name = "root",
-        children = { 2, 3, 4, 5 }
-    },
-    {
-        name = "node2",
-        children = { 21 }
-    },
-    {
-        name = "node3",
-        children = {}
-    },
-    {
-        name = "node4",
-        children = { 10, 11, 12, 13 }
-    },
-    {
-        name = "node5",
-        children = { 6, 7, 8, 9, 16, 17 }
-    },
-    {
-        name = "node6",
-        children = {}
-    },
-    {
-        name = "node7",
-        children = { 15, 18 }
-    },
-    {
-        name = "node8",
-        children = {}
-    },
-    {
-        name = "node9",
-        children = {}
-    },
-    {
-        name = "node10",
-        children = {}
-    },
-    {
-        name = "node11",
-        children = {}
-    },
-    {
-        name = "node12",
-        children = {}
-    },
-    {
-        name = "node13",
-        children = {}
-    },
-    {
-        name = "node14",
-        children = {}
-    },
-    {
-        name = "node15",
-        children = { 14 }
-    },
-    {
-        name = "node16",
-        children = {  }
-    },
-    {
-        name = "node17",
-        children = {  }
-    },
-    {
-        name = "node18",
-        children = { 19, 20 }
-    },
-    {
-        name = "node19",
-        children = {  }
-    },
-    {
-        name = "node20",
-        children = {  }
-    },
-    {
-        name = "node21",
-        children = {  }
-    }
-}
-
 local updated_tree = false
 local node_is_hovered = false
 local node_hovered_id = 0
@@ -2391,8 +2402,8 @@ local function get_field_write_handler(field)
         return handler
     end
 
-    return function(field)
-        return field
+    return function(f)
+        return f
     end
 end
 
@@ -3433,7 +3444,7 @@ local function draw_stupid_editor(name)
         imgui.end_menu_bar()
     end
 
-    if (tree ~= nil and (active_tree == nil or tree ~= active_tree)) then
+    if (tree ~= nil and (active_tree == nil or tree ~= active_tree) or #custom_tree == 0) then
         log.debug("Recreating active tree")
 
         recreate_globals()
