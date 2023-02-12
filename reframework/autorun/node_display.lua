@@ -1,3 +1,11 @@
+local imgui = imgui
+local log = log
+local object_explorer = object_explorer
+local re = re
+local imnodes = imnodes
+local sdk = sdk
+local json = json
+
 if imnodes == nil or imgui.set_next_window_size == nil or sdk.hook_vtable == nil then
     re.msg("Your REFramework version is not new enough to use the behavior tree viewer!")
     return
@@ -51,6 +59,7 @@ local basic_node_arrays = {
     "tags"
 }
 
+local cached_node_referenced_by = {}
 local cached_node_names = {}
 local cached_node_indices = {}
 
@@ -159,6 +168,7 @@ local custom_tree = {
 local function recreate_globals()
     custom_tree = {}
     cached_node_names = {}
+    cached_node_referenced_by = {}
     cached_node_indices = {}
     action_map = {}
     action_name_map = {}
@@ -195,6 +205,8 @@ local cfg = {
     parent_display_depth = 0,
     default_node = 0,
     show_side_panels = true,
+    use_dynamic_side_panels = true,
+    use_transition_positioning = true,
     graph_closes_with_reframework = true,
 
     -- editor
@@ -209,6 +221,29 @@ local cfg = {
     default_action_search_name = "",
     search_allow_duplicates = true
 }
+
+local visisted_node_stack = {}
+
+local function peek_last_node()
+    if #visisted_node_stack == 0 then return -1 end
+    return visisted_node_stack[#visisted_node_stack]
+end
+
+local function push_visited_node(v)
+    if v == peek_last_node() then return end
+    -- if v == cfg.default_node then return end
+    table.insert(visisted_node_stack, v)
+end
+
+local function pop_visited_node()
+    local val = nil
+
+    if #visisted_node_stack ~= 0 then
+        val = visisted_node_stack[#visisted_node_stack]
+        table.remove(visisted_node_stack)
+    end
+    return val
+end
 
 local cfg_path = "bhvteditor/main_config.json"
 
@@ -230,6 +265,10 @@ load_cfg()
 re.on_config_save(function()
     json.dump_file(cfg_path, cfg)
 end)
+
+local function get_cached_node_index_by_id(tree, node)
+    return cached_node_indices[tree][node:as_memoryview():address()]
+end
 
 -- i can be nil, it doesn't need to copy from a node.
 local function create_new_node(core, tree, i)
@@ -286,7 +325,7 @@ local function create_new_node(core, tree, i)
     local node_data_element_size = node_datas[1]:as_memoryview():get_address() - node_datas[0]:as_memoryview():get_address()
     local node_datas_start = node_datas[0]:as_memoryview():get_address()
     local node_datas_end = node_datas_start + (node_datas:size() * node_data_element_size)
-    
+
     tree_data:get_nodes():emplace()
     core:relocate_datas(node_datas_start, node_datas_end, tree_data:get_nodes())
 
@@ -327,7 +366,7 @@ local function create_new_node(core, tree, i)
             local new_array = new_node_data["get_" .. array_name](new_node_data)
 
             new_array:as_memoryview():wipe() -- does not delete the memory, just calls memset(0) on it
-            
+
             for i=0, old_array:size()-1 do
                 new_array:emplace()
                 new_array[i] = old_array[i]
@@ -346,10 +385,10 @@ local function create_new_node(core, tree, i)
             local new_array = new_node_data["get_" .. array_name](new_node_data)
 
             new_array:as_memoryview():wipe() -- does not delete the memory, just calls memset(0) on it
-            
+
             for i=0, old_array:size()-1 do
                 new_array:emplace()
-                
+
                 for j=0, old_array[i]:size()-1 do
                     new_array[i]:emplace()
                     new_array[i][j] = old_array[i][j]
@@ -463,7 +502,7 @@ local function cache_node_indices(sorted_nodes, tree)
 
     node_map[tree] = {}
     node_names[tree] = {}
-    
+
     for k, node in pairs(sorted_nodes) do
         table.insert(node_map[tree], node)
         table.insert(node_names[tree], tostring(cached_node_indices[tree][node:as_memoryview():address()]) .. ": " .. node:get_full_name())
@@ -494,12 +533,12 @@ local function get_localplayer()
     if gn == "re2" or gn == "re3" then
         local player_manager = sdk.get_managed_singleton(sdk.game_namespace("PlayerManager"))
         if player_manager == nil then return nil end
-    
+
         return player_manager:call("get_CurrentPlayer")
     elseif gn == "dmc5" then
         local player_manager = sdk.get_managed_singleton(sdk.game_namespace("PlayerManager"))
         if player_manager == nil then return nil end
-    
+
         local player_comp = player_manager:call("get_manualPlayer")
         if player_comp == nil then return nil end
 
@@ -507,7 +546,7 @@ local function get_localplayer()
     elseif gn == "mhrise" then
         local player_manager = sdk.get_managed_singleton(sdk.game_namespace("player.PlayerManager"))
         if player_manager == nil then return nil end
-    
+
         local player_comp = player_manager:call("findMasterPlayer")
         if player_comp == nil then return nil end
 
@@ -584,7 +623,7 @@ local function display_action(tree, i, node, name, action)
         action:call("set_Enabled", not enabled)
         enabled = not enabled
     end
-    
+
     imgui.same_line()
     local made = imgui.tree_node(tostring(i) .. ": ")
     imgui.same_line()
@@ -625,6 +664,15 @@ local function display_action(tree, i, node, name, action)
                 end
             end
 
+            changed, replace_action_id_text = imgui.input_text("Replace Action by ID", replace_action_id_text, 1 << 5)
+
+            if changed then
+                first_times = {}
+
+                node:get_data():get_actions()[i] = tonumber(replace_action_id_text)
+                selection_map[tree][i] = tonumber(replace_action_id_text)
+            end
+
             changed, selection = imgui.combo("Replace Action", selection, action_name_map[tree])
 
             if changed then
@@ -636,7 +684,7 @@ local function display_action(tree, i, node, name, action)
         end
 
         object_explorer:handle_address(action)
-        
+
 
         imgui.tree_pop()
     end
@@ -649,7 +697,7 @@ local function display_event(tree, i, j, node, name, event)
         event:call("set_Enabled", not enabled)
         enabled = not enabled
     end
-    
+
     imgui.same_line()
     local made = imgui.tree_node(tostring(i) .. ": ")
     imgui.same_line()
@@ -698,7 +746,7 @@ local function display_event(tree, i, j, node, name, event)
         end
 
         object_explorer:handle_address(event)
-        
+
 
         imgui.tree_pop()
     end
@@ -706,7 +754,7 @@ end
 
 local replace_condition_id_text = ""
 
-local function display_condition(tree, i, node, name, cond)
+local function display_condition(tree, i, node, name, cond, target_node)
     local uvar = nil
 
     if cond ~= nil then
@@ -731,7 +779,13 @@ local function display_condition(tree, i, node, name, cond)
         end
     end
 
-    if imgui.tree_node(name) then
+    local made_node = imgui.tree_node(name)
+    if target_node ~= nil then
+        imgui.same_line()
+        imgui.text_colored("[" .. tree:get_node(target_node):get_full_name() .. "]", 0xFF00FF00)
+    end
+
+    if made_node then
         HookManager:get(cond):display_hooks()
 
         if cond ~= nil then
@@ -744,13 +798,13 @@ local function display_condition(tree, i, node, name, cond)
             if condition_selection_map[tree] == nil then
                 condition_selection_map[tree] = {}
             end
-    
+
             local selection = condition_selection_map[tree][i]
-    
+
             if selection == nil then
                 selection = 1
             end
-    
+
             for j, v in ipairs(condition_map[tree]) do
                 if v.condition == cond then
                     selection = j
@@ -892,12 +946,12 @@ local function display_node_replacement(text, tree, node, node_array, node_array
         end
 
         local changed = false
-        local selection = selection_map[tree][node:get_id()] 
+        local selection = selection_map[tree][node:get_id()]
         changed, selection = imgui.combo(text, selection, node_names[tree])
 
         if changed then
             local target_node = node_map[tree][selection]
-            node_array[node_array_idx] = cached_node_indices[tree][target_node:as_memoryview():address()]
+            node_array[node_array_idx] = get_cached_node_index_by_id(tree, target_node)
             selection_map[tree][node:get_id()] = selection
         end
     end
@@ -913,12 +967,12 @@ local function display_node_addition(text, tree, node, node_array)
         end
 
         local changed = false
-        local selection = selection_map[tree][node:get_id()] 
+        local selection = selection_map[tree][node:get_id()]
         changed, selection = imgui.combo(text, selection, node_names[tree])
 
         if changed then
             local target_node = node_map[tree][selection]
-            node_array:push_back(cached_node_indices[tree][target_node:as_memoryview():address()])
+            node_array:push_back(get_cached_node_index_by_id(tree, target_node))
             selection_map[tree][node:get_id()] = selection
 
             -- add dummy (-1) transitions so the game doesn't crash
@@ -948,7 +1002,8 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
         for i=0, tree:get_node_count()-1 do
             local test_node = tree:get_node(i)
 
-            if test_node == node then
+            if test_node == node and i ~= cfg.default_node then
+                push_visited_node(cfg.default_node)
                 queued_editor_id_move = {["i"] = i, ["id"] = node:get_id()}
                 break
             end
@@ -969,7 +1024,10 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
 
     imgui.same_line()
 
-    local node_name = cached_node_indices[tree][node:as_memoryview():address()] .. ": " .. node:get_full_name()
+    imgui.text("["..tostring(node_array_idx).."]")
+    imgui.same_line()
+
+    local node_name = get_cached_node_index_by_id(tree, node) .. ": " .. node:get_full_name()
 
     local made_node = imgui.tree_node(node_name)
 
@@ -991,14 +1049,15 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
 
         imgui.input_text("Address", string.format("%X", node:as_memoryview():get_address()))
 
-        display_node_replacement("Replace Node", tree, node, node_array, node_array_idx)
+        if node_array ~= nil then
+            display_node_replacement("Replace Node", tree, node, node_array, node_array_idx)
 
-        changed, replace_node_id_text = imgui.input_text("Replace Node ID by ID", replace_node_id_text, 1 << 5)
-        
-        if changed then
-            node_array[node_array_idx] = tonumber(replace_node_id_text)
+            changed, replace_node_id_text = imgui.input_text("Replace Node ID by ID", replace_node_id_text, 1 << 5)
+
+            if changed then
+                node_array[node_array_idx] = tonumber(replace_node_id_text)
+            end
         end
-
         --imgui.text("Full name: " .. get_node_full_name(node))
         --imgui.text("ID: " .. node:get_id())
 
@@ -1015,11 +1074,11 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             node:as_memoryview():write_qword(0x20, selector:get_address())
         end
 
-        if cond ~= nil then 
+        if cond ~= nil then
             display_condition(tree, node_array_idx, node, cond:get_type_definition():get_full_name(), cond)
         end
 
-        if imgui.tree_node("Children") then
+        if imgui.tree_node("Children [" .. tostring(#node_data:get_children()) .. "]") then
             changed, add_child_id_text = imgui.input_text("Add Child by ID", add_child_id_text, 1 << 5)
 
             if changed then
@@ -1044,7 +1103,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                     -- Do it again but do it within the node's data structure.
                     for i=0, tree:get_node_count()-1 do
                         local test_node = tree:get_node(i)
-            
+
                         if test_node == node then
                             target_node:get_data().parent = i
                             log.debug("Successfully replaced parent index of node (data) " .. target_node:get_id() .. " with " .. i)
@@ -1058,7 +1117,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 end
             end
 
-            display_bhvt_array(tree, node, node_data:get_children(), tree.get_node, 
+            display_bhvt_array(tree, node, node_data:get_children(), tree.get_node,
                 function(tree, i, node, element)
                     display_node(tree, element, node_data:get_children(), i)
                 end
@@ -1080,7 +1139,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 selection_map[tree][node:get_id()] = 1
             end
 
-            local selection = selection_map[tree][node:get_id()] 
+            local selection = selection_map[tree][node:get_id()]
 
             changed, selection = imgui.combo("Add Action", selection, action_name_map[tree])
 
@@ -1091,7 +1150,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 node_data:get_actions():push_back(action_map[tree][selection].index)
                 selection_map[tree][node:get_id()] = selection
             end
-            
+
             changed, add_action_id_text = imgui.input_text("Add Action by ID", add_action_id_text, 1 << 5)
 
             if changed then
@@ -1142,7 +1201,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 node_data:get_actions():clear()
             end
 
-            display_bhvt_array(tree, node, node_data:get_actions(), tree.get_action, 
+            display_bhvt_array(tree, node, node_data:get_actions(), tree.get_action,
                 function(tree, i, node, element)
                     display_action(tree, i, node, element:get_type_definition():get_full_name(), element)
                 end,
@@ -1190,7 +1249,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
         --------------------------------------------------
         ----------- NODE TRANSITION STATES ---------------
         --------------------------------------------------
-        if imgui.tree_node("Transition States") then
+        if imgui.tree_node("Transition States [" .. tostring(#node_data:get_states()) .. "]") then
             if display_node_addition("Add Transition State", tree, node, node_data:get_states()) then
                 first_times = {}
 
@@ -1213,13 +1272,15 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 node_data:get_transition_ids():push_back(0)
                 node_data:get_transition_attributes():push_back(0)
             end
- 
-            display_bhvt_array(tree, node, node_data:get_states(), tree.get_node, 
+
+            display_bhvt_array(tree, node, node_data:get_states(), tree.get_node,
                 function(tree, i, node, element)
                     local conditions = node:get_data():get_transition_conditions()
                     local condition = tree:get_condition(conditions[i])
 
                     display_node(tree, element, node_data:get_states(), i, condition)
+                    imgui.same_line()
+                    imgui.text("[" .. tostring(i) .. "]")
                 end,
                 -- duplication predicate
                 function(i, element)
@@ -1240,7 +1301,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
         --------------------------------------------------
         ----------- NODE TRANSITION CONDITONS ------------
         --------------------------------------------------
-        local draw_conditions = function(transition_array, transition_array_name)
+        local draw_conditions = function(transition_array, transition_array_name, target_node_array)
             local changed = false
 
             if selection_map[tree] == nil then
@@ -1248,7 +1309,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 selection_map[tree][node:get_id()] = 1
             end
 
-            local selection = selection_map[tree][node:get_id()] 
+            local selection = selection_map[tree][node:get_id()]
 
             changed, selection = imgui.combo("Add Condition", selection, condition_name_map[tree])
 
@@ -1259,7 +1320,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 transition_array:push_back(condition_map[tree][selection].index)
                 selection_map[tree][node:get_id()] = selection
             end
-            
+
             changed, selection = imgui.combo("Copy from", selection, node_names[tree])
 
             if changed then
@@ -1293,7 +1354,11 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                     if element == nil then
                         imgui.text(tostring(i) .. ": [ NULL -1 ]")
                     else
-                        display_condition(tree, i, node, tostring(i) .. ": " .. element:get_type_definition():get_full_name(), element)
+                        local target_node = nil
+                        if target_node_array ~= nil then
+                            target_node = target_node_array[i]
+                        end
+                        display_condition(tree, i, node, tostring(i) .. ": " .. element:get_type_definition():get_full_name(), element, target_node)
                     end
                 end,
                 -- duplication predicate
@@ -1322,16 +1387,16 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             )
         end
 
-        if imgui.tree_node("Transition Conditions") then
-            draw_conditions(node_data:get_transition_conditions(), "get_transition_conditions")
+        if imgui.tree_node("Transition State Conditions [" .. tostring(#node_data:get_transition_conditions()) .. "]") then
+            draw_conditions(node_data:get_transition_conditions(), "get_transition_conditions", node_data:get_states())
             imgui.tree_pop()
         end
 
-        if imgui.tree_node("Transition StatesEx") then
+        if imgui.tree_node("Transition StatesEx [" .. tostring(#node_data:get_states_2()) .. "]") then
             if display_node_addition("Add Transition StateEx", tree, node, node_data:get_states_2()) then
                 node_data:get_transition_conditions():push_back(-1)
             end
- 
+
             display_bhvt_array(tree, node, node_data:get_states_2(), tree.get_node, function(tree, i, node, element)
                 display_node(tree, element, node_data:get_states_2(), i)
             end)
@@ -1339,18 +1404,26 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             imgui.tree_pop()
         end
 
-        if imgui.tree_node("Transition Start States") then
+        if imgui.tree_node("Transition Start States [" .. tostring(#node_data:get_start_states()) .. "]") then
             display_node_addition("Add Start State", tree, node, node_data:get_start_states())
 
-            display_bhvt_array(tree, node, node_data:get_start_states(), tree.get_node, function(tree, i, node, element)
-                display_node(tree, element, node_data:get_start_states(), i)
+            display_bhvt_array(tree, node, node_data:get_start_states(), tree.get_node,
+            function(tree, i, node, element)
+                local conditions = node:get_data():get_start_transitions()
+                local condition = tree:get_condition(conditions[i])
+                display_node(tree, element, node_data:get_start_states(), i, condition)
             end)
 
             imgui.tree_pop()
         end
 
-        if imgui.tree_node("Transition IDs") then
-            display_bhvt_array(tree, node, node_data:get_transition_ids(), 
+        if imgui.tree_node("Transition Start State Conditions [" .. tostring(#node_data:get_start_states()) .. "]") then
+            draw_conditions(node_data:get_start_transitions(), "get_start_transitions", node_data:get_start_states())
+            imgui.tree_pop()
+        end
+
+        if imgui.tree_node("Transition IDs [" .. tostring(#node_data:get_transition_ids()) .. "]") then
+            display_bhvt_array(tree, node, node_data:get_transition_ids(),
                 function(tree, x)
                     return x
                 end,
@@ -1372,8 +1445,8 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             imgui.tree_pop()
         end
 
-        if imgui.tree_node("Transition Attributes") then
-            display_bhvt_array(tree, node, node_data:get_transition_attributes(), 
+        if imgui.tree_node("Transition Attributes [" .. tostring(#node_data:get_transition_attributes()) .. "]") then
+            display_bhvt_array(tree, node, node_data:get_transition_attributes(),
                 function(tree, x)
                     return x
                 end,
@@ -1398,7 +1471,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
         --------------------------------------------------
         ----------- NODE TRANSITION EVENTS ---------------
         --------------------------------------------------
-        if imgui.tree_node("Transition Events") then
+        if imgui.tree_node("Transition Events [" .. tostring(#node_data:get_transition_events()) .. "]") then
             if selection_map[tree] == nil then
                 selection_map[tree] = {}
                 selection_map[tree][node:get_id()] = 1
@@ -1406,7 +1479,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
 
             imgui.push_id(node_data:get_transition_events():as_memoryview():address())
 
-            display_bhvt_array(tree, node, node_data:get_transition_events(), 
+            display_bhvt_array(tree, node, node_data:get_transition_events(),
                 function(tree, x)
                     return x
                 end,
@@ -1427,22 +1500,22 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                     end
 
                     if made then
-                        local selection = selection_map[tree][node:get_id()] 
+                        local selection = selection_map[tree][node:get_id()]
 
                         changed, selection = imgui.combo("Add event", selection, event_name_map[tree])
-            
+
                         if changed then
                             first_times = {}
-            
+
                             evts:push_back(event_map[tree][selection].index)
                             selection_map[tree][node:get_id()] = selection
                         end
-                        
+
                         changed, add_event_id_text = imgui.input_text("Add event by ID", add_event_id_text, 1 << 5)
-            
+
                         if changed then
                             first_times = {}
-            
+
                             evts:push_back(tonumber(add_event_id_text))
                         end
 
@@ -1450,7 +1523,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
 
                         if changed then
                             first_times = {}
-            
+
                             tree:get_transitions():push_back(sdk.create_instance("via.behaviortree.TransitionEvent"):add_ref_permanent())
                             evts:push_back(tree:get_transition_count() - 1)
                         end
@@ -1463,7 +1536,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
 
                         imgui.push_id(tostring(evts:as_memoryview():get_address()))
 
-                        display_bhvt_array(tree, node, evts, 
+                        display_bhvt_array(tree, node, evts,
                             function(tree, x)
                                 return tree:get_transitions()[x]
                             end,
@@ -1478,12 +1551,12 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                                 if element == nil then
                                     return
                                 end
-            
+
                                 local global_index = evts[j]
-            
+
                                 local duped_element = nil
                                 local duped_index = 0
-            
+
                                 if (global_index & (1 << 30)) ~= 0 then
                                     duped_element = duplicate_global_static_transition_event(tree, global_index & 0xFFFFFFF)
                                     duped_index = (tree:get_data():get_static_transitions():size() - 1) | (1 << 30)
@@ -1491,7 +1564,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                                     duped_element = duplicate_global_transition_event(tree, global_index)
                                     duped_index = tree:get_transitions():size() - 1
                                 end
-            
+
                                 if duped_element ~= nil then
                                     evts:push_back(duped_index)
                                 end
@@ -1508,13 +1581,13 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             imgui.tree_pop()
         end
 
-        if imgui.tree_node("Conditions") then
+        if imgui.tree_node("Conditions [" .. tostring(#node_data:get_conditions()) .. "]") then
             draw_conditions(node_data:get_conditions(), "get_conditions")
             imgui.tree_pop()
         end
 
-        if imgui.tree_node("Tags") then
-            display_bhvt_array(tree, node, node_data:get_tags(), 
+        if imgui.tree_node("Tags [" .. tostring(#node_data:get_tags()) .. "]") then
+            display_bhvt_array(tree, node, node_data:get_tags(),
                 function(tree, x)
                     return x
                 end,
@@ -1535,6 +1608,18 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             )
 
             imgui.tree_pop()
+        end
+
+        local current_index = get_cached_node_index_by_id(tree, node)
+        local referenced_nodes = cached_node_referenced_by[current_index]
+        if referenced_nodes ~= nil then
+            if imgui.tree_node("Referenced by " .. #referenced_nodes .. " Nodes") then
+                for _, ref_by_node_index in pairs(referenced_nodes) do
+                    display_node(tree, tree:get_node(ref_by_node_index), nil, ref_by_node_index)
+                end
+            end
+        else
+            imgui.text(tostring(current_index) .. " referenced by nothing.")
         end
 
         imgui.tree_pop()
@@ -1570,10 +1655,10 @@ local function cache_tree(core, tree)
         condition_name_map[tree] = {}
 
         local action_count = tree:get_action_count()
-        
+
         for i=0, action_count-1 do
             local action = tree:get_action(i)
-    
+
             if action ~= nil then
                 table.insert(action_map[tree], {index=i, ["action"]=action})
                 table.insert(action_name_map[tree], tostring(i) .. ": " .. action:get_type_definition():get_full_name())
@@ -1596,7 +1681,7 @@ local function cache_tree(core, tree)
         for i=0, static_condition_count-1 do
             local real_index = i | (1 << 30)
             local condition = tree:get_condition(real_index)
-    
+
             if condition ~= nil then
                 table.insert(condition_map[tree], {index=real_index, ["condition"]=condition})
                 table.insert(condition_name_map[tree], tostring(real_index) .. ": " .. condition:get_type_definition():get_full_name())
@@ -1611,7 +1696,7 @@ local function cache_tree(core, tree)
             if not sdk.is_managed_object(condition) then
                 log.debug("Condition " .. tostring(i) .. " in " .. string.format("%x", tree:as_memoryview():get_address()) .. " is not a managed object (" .. tostring(condition) .. ")")
             end
-    
+
             if condition ~= nil then
                 table.insert(condition_map[tree], {index=i, ["condition"]=condition})
                 table.insert(condition_name_map[tree], tostring(i) .. ": " .. condition:get_type_definition():get_full_name())
@@ -1706,15 +1791,15 @@ local function display_tree(core, tree)
                     display_action(tree, i, nil, tostring(i) .. ": " .. action:get_type_definition():get_full_name(), action)
                 end
             end]]
-    
-            display_bhvt_array(tree, node, tree:get_data():get_action_methods(), 
-            function(tree, x) 
+
+            display_bhvt_array(tree, node, tree:get_data():get_action_methods(),
+            function(tree, x)
                 return x
-            end, 
+            end,
             function(tree, i, node, element)
                 imgui.text(tostring(i) .. ": " .. tostring(element))
             end)
-            
+
             imgui.tree_pop()
         end
 
@@ -1726,10 +1811,10 @@ local function display_tree(core, tree)
             end
         end]]
 
-        display_bhvt_array(tree, node, tree:get_actions(), 
-            function(tree, x) 
+        display_bhvt_array(tree, node, tree:get_actions(),
+            function(tree, x)
                 return x
-            end, 
+            end,
             function(tree, i, node, element)
                 if element ~= nil then
                     display_action(tree, i, nil, tostring(i) .. ": " .. element:get_type_definition():get_full_name(), element)
@@ -1741,7 +1826,7 @@ local function display_tree(core, tree)
                 duplicate_global_action(tree, i)
             end
         )
-        
+
         imgui.tree_pop()
     end
 
@@ -1759,10 +1844,10 @@ local function display_tree(core, tree)
             display_condition(tostring(i | (1 << 30)) .. ": " .. cond:get_type_definition():get_full_name(), cond)
         end]]
 
-        display_bhvt_array(tree, node, tree:get_data():get_static_conditions(), 
-            function(tree, x) 
+        display_bhvt_array(tree, node, tree:get_data():get_static_conditions(),
+            function(tree, x)
                 return x
-            end, 
+            end,
             function(tree, i, node, element)
                 if element ~= nil then
                     display_condition(tree, i, nil, tostring(i | (1 << 30)) .. ": " .. element:get_type_definition():get_full_name(), element)
@@ -1777,10 +1862,10 @@ local function display_tree(core, tree)
 
         imgui.separator()
 
-        display_bhvt_array(tree, node, tree:get_conditions(), 
-            function(tree, x) 
+        display_bhvt_array(tree, node, tree:get_conditions(),
+            function(tree, x)
                 return x
-            end, 
+            end,
             function(tree, i, node, element)
                 if element ~= nil then
                     display_condition(tree, i, nil, tostring(i) .. ": " .. element:get_type_definition():get_full_name(), element)
@@ -1792,7 +1877,7 @@ local function display_tree(core, tree)
                 duplicate_global_condition(tree, i)
             end
         )
-        
+
         imgui.tree_pop()
     end
 
@@ -1804,10 +1889,10 @@ local function display_tree(core, tree)
     imgui.text(" [" .. tostring(tree:get_data():get_expression_tree_conditions():size()) .. "] ")
 
     if made then
-        display_bhvt_array(tree, node, tree:get_data():get_expression_tree_conditions(), 
-            function(tree, x) 
+        display_bhvt_array(tree, node, tree:get_data():get_expression_tree_conditions(),
+            function(tree, x)
                 return x
-            end, 
+            end,
             function(tree, i, node, element)
                 if element ~= nil then
                     display_condition(tree, i, nil, tostring(i) .. ": " .. element:get_type_definition():get_full_name(), element)
@@ -1826,10 +1911,10 @@ local function display_tree(core, tree)
     imgui.text(" [" .. tostring(tree:get_static_transition_count() + tree:get_transition_count()) .. "] ")
 
     if made then
-        display_bhvt_array(tree, nil, tree:get_data():get_static_transitions(), 
-            function(tree, x) 
+        display_bhvt_array(tree, nil, tree:get_data():get_static_transitions(),
+            function(tree, x)
                 return x
-            end, 
+            end,
             function(tree, i, node, element)
                 if element ~= nil then
                     display_event(tree, i, nil, nil, tostring(i | (1 << 30)) .. ": " .. element:get_type_definition():get_full_name(), element)
@@ -1841,13 +1926,13 @@ local function display_tree(core, tree)
                 duplicate_global_static_transition_event(tree, i)
             end
         )
-        
+
         imgui.separator()
 
         display_bhvt_array(tree, nil, tree:get_transitions(),
-            function(tree, x) 
+            function(tree, x)
                 return x
-            end, 
+            end,
             function(tree, i, node, element)
                 if element ~= nil then
                     display_event(tree, i, nil, nil, tostring(i) .. ": " .. element:get_type_definition():get_full_name(), element)
@@ -1890,10 +1975,10 @@ local function display_tree(core, tree)
             create_new_node(core, tree, nil)
         end
 
-        display_bhvt_array(tree, node, tree:get_nodes(), 
-            function(tree, x) 
+        display_bhvt_array(tree, node, tree:get_nodes(),
+            function(tree, x)
                 return x
-            end, 
+            end,
             function(tree, i, node, element)
                 if element ~= nil then
                     display_node(tree, tree:get_node(i), tree:get_nodes(), i)
@@ -1947,7 +2032,6 @@ local function display_core_handle(layer, i)
 end
 
 local custom_addr = 0
-
 re.on_draw_ui(function()
     local player = get_localplayer()
     if not player then return end
@@ -1969,7 +2053,7 @@ re.on_draw_ui(function()
             end
         end
     end
-        
+
     if motion_fsm2 ~= nil and imgui.tree_node("Motion FSM2") then
         object_explorer:handle_address(motion_fsm2:get_address())
 
@@ -1981,7 +2065,7 @@ re.on_draw_ui(function()
                 display_core_handle(layer, i)
             end
         end
-    
+
         imgui.tree_pop()
     end
 
@@ -1994,7 +2078,7 @@ re.on_draw_ui(function()
                 display_core_handle(layer, i)
             end
         end
-    
+
         imgui.tree_pop()
     end
 
@@ -2072,7 +2156,7 @@ local function draw_standard_node(name, custom_id, render_after_cb)
             else
                 table.insert(out2, imgui.get_id(name .. "parent"))
             end
-        
+
             imnodes.begin_input_attribute(out2[1])
             imgui.text("parent")
             imnodes.end_input_attribute()
@@ -2087,7 +2171,7 @@ local function draw_standard_node(name, custom_id, render_after_cb)
             else
                 table.insert(out2, imgui.get_id(name .. "children"))
             end
-        
+
             imnodes.begin_output_attribute(out2[1])
             imgui.indent(math.max(imgui.calc_text_size(name).x, 60))
             imgui.text("children")
@@ -2112,6 +2196,7 @@ local node_hovered_id = 0
 local node_map = {}
 
 local draw_node_children = nil
+local draw_node_children_by_transition = nil
 local draw_node = nil
 
 local active_tree = nil
@@ -2194,7 +2279,134 @@ draw_node_children = function(i, node, seen, active)
     return out_dim_requirements, active
 end
 
-draw_node = function(i, seen)
+draw_node_children_by_transition = function(i, node, seen, active, root_node_child_map)
+    seen = seen or {}
+    if seen[node] then return end
+
+    local node_descriptor = custom_tree[i]
+
+    --[[if not node_descriptor.children or #node_descriptor.children == 0 then
+        return { x=0, y=0 }
+    end]]
+
+    local node_pos = imnodes.get_node_grid_space_pos(node.id)
+    local node_dims = imnodes.get_node_dimensions(node.id)
+
+    local out_dim_requirements = { x=0, y=0 }
+
+    if root_node_child_map == nil then
+        root_node_child_map = {}
+        if node_descriptor.children == nil or #node_descriptor.children == 0 then
+            local current_node = active_tree:get_node(i)
+            local parent_node = current_node:get_parent()
+            if parent_node ~= nil then
+                local parent_index = get_cached_node_index_by_id(active_tree, parent_node)
+
+                local parent_descriptor = custom_tree[tonumber(parent_index)]
+                for _, child_id in ipairs(parent_descriptor.children) do
+                    root_node_child_map[child_id] = { drawn = false }
+                end
+            end
+        else
+            for _, child_id in ipairs(node_descriptor.children) do
+                root_node_child_map[child_id] = { drawn = false }
+            end
+        end
+    end
+
+    local function draw_child_node(child_id, dangling)
+        -- generally same as above
+        local child, node_dim_requirements, child_active = draw_node(child_id, seen, root_node_child_map, dangling)
+        -- Y needs to be dynamic
+        local child_render_pos = {
+            x = node_pos.x + node_dims.x + 20,
+            y = node_pos.y + out_dim_requirements.y
+            --y = node_pos.y - ((#node_descriptor.children - 1) * (node_dims.y / 2)) + node_dim_requirements.y + ((j-1) * node_dims.y)
+        }
+
+        if not unlock_node_positioning then
+            if cfg.lerp_nodes then
+                local current_child_pos = imnodes.get_node_grid_space_pos(child.id)
+
+                local crp = Vector2f.new(child_render_pos.x, child_render_pos.y)
+                local dist = (current_child_pos - crp):length()
+
+                if dist < 20 then
+                    crp = current_child_pos + ((crp - current_child_pos) * math.min(delta_time, 0.5))
+                else
+                    crp = current_child_pos + ((crp - current_child_pos):normalized() * math.min(math.min(delta_time, 0.5) * dist * cfg.lerp_speed * 10.0, dist))
+                end
+
+                imnodes.set_node_grid_space_pos(child.id, crp.x, crp.y)
+            else
+                imnodes.set_node_grid_space_pos(child.id, child_render_pos.x, child_render_pos.y)
+            end
+        end
+
+        local link_id = imgui.get_id(node_descriptor.name .. custom_tree[child_id].name .. "LINK")
+
+        -- if node_is_hovered then
+            -- if node_hovered_id == node_map[i].id then
+                draw_link(false, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
+            -- end
+
+            -- if node_hovered_id == node_map[child_id].id then
+                draw_link(false, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
+            -- end
+        -- elseif active and child_active then
+            draw_link(active, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
+        -- end
+
+        out_dim_requirements.x = out_dim_requirements.x + node_dim_requirements.x
+        out_dim_requirements.y = out_dim_requirements.y + node_dim_requirements.y --[[+ (imnodes.get_node_dimensions(child.id).y * #custom_tree[child_id].children)]]
+        --out_dim_requirements.y = out.y + imnodes.get_node_dimensions(child_node.id).y
+    end
+
+    local drawn_count = 0
+    -- sdk.get_managed_singleton("snow.gui.ChatManager"):call("reqAddChatInfomation", "Drawing node " .. tostring(i), 2289944406)
+    for j, start_state_id in ipairs(node_descriptor.start_states) do
+        if root_node_child_map[start_state_id] and not root_node_child_map[start_state_id].drawn then
+            -- is child, draw
+            root_node_child_map[start_state_id].drawn = true
+
+            draw_child_node(start_state_id)
+            drawn_count = drawn_count + 1
+        end
+    end
+
+    for j, state_id in ipairs(node_descriptor.states) do
+        if root_node_child_map[state_id] and not root_node_child_map[state_id].drawn then
+            -- is child, draw
+            root_node_child_map[state_id].drawn = true
+
+            draw_child_node(state_id)
+            drawn_count = drawn_count + 1
+        end
+    end
+
+    for j, child_id in ipairs(node_descriptor.children) do
+        if root_node_child_map[child_id] and not root_node_child_map[child_id].drawn then
+            root_node_child_map[child_id].drawn = true
+
+            draw_child_node(child_id, true)
+            drawn_count = drawn_count + 1
+        end
+    end
+
+    -- Only add the node dimensions to the out dim requirements
+    -- if the node has no children, meaning it's the end of the chain
+    if drawn_count == 0 then
+        out_dim_requirements.y = out_dim_requirements.y + node_dims.y + 20
+    else
+        if node_dims.y > out_dim_requirements.y then
+            out_dim_requirements.y = node_dims.y + 5
+        end
+    end
+
+    return out_dim_requirements, active
+end
+
+draw_node = function(i, seen, valid_node_map, dangling)
     seen = seen or {}
     if seen[i] then return end
     if not custom_tree[i] then return end
@@ -2211,8 +2423,10 @@ draw_node = function(i, seen)
     end
 
     local node_descriptor = custom_tree[i]
+    local node_name = "[" .. tostring(i) .. "]" .. node_descriptor.name
+    if dangling then node_name = "[dangling] " .. node_name end
     local node = draw_standard_node(
-        "[" .. tostring(i) .. "]" .. node_descriptor.name, 
+        node_name,
         custom_id,
         function()
             if not node_map[i] then return end
@@ -2251,7 +2465,11 @@ draw_node = function(i, seen)
         active = real_node:get_status1() == 2 or real_node:get_status2() == 2
     end
 
-    return node, draw_node_children(i, node, seen, active)
+    if cfg.use_transition_positioning then
+        return node, draw_node_children_by_transition(i, node, seen, active, valid_node_map)
+    else
+        return node, draw_node_children(i, node, seen, active)
+    end
 end
 
 local last_editor_size = Vector2f.new(0, 0)
@@ -2287,7 +2505,7 @@ local function perform_panning()
         new_panning.x = panning.x + cfg.pan_speed * delta_time
     end
 
-    
+
     imgui.same_line()
     imgui.indent(HORIZONTAL_ARROW_INDENT)
 
@@ -2445,15 +2663,15 @@ local function get_field_read_handler(field)
     if not decimal_types[field] then
         return function(json_field)
             if type(json_field) == "string" or type(json_field) == "boolean" then
-                return json_field 
+                return json_field
             else
-                return math.floor(json_field) 
+                return math.floor(json_field)
             end
         end
     end
 
-    return function(json_field) 
-        return json_field 
+    return function(json_field)
+        return json_field
     end
 end
 
@@ -2545,7 +2763,7 @@ local function save_tree(tree, filename)
 
     local bad_props = {}
 
-    local make_properties = function(obj, t, out) 
+    local make_properties = function(obj, t, out)
         local methods = t:get_methods()
 
         for i, method in ipairs(methods) do
@@ -2592,7 +2810,7 @@ local function save_tree(tree, filename)
             if action_hook then
                 action_hook:serialize(action_tbl)
             end
-            
+
             local t = action:get_type_definition()
 
             while t ~= nil do
@@ -2685,7 +2903,7 @@ local function save_tree(tree, filename)
             if condition_hook then
                 condition_hook:serialize(condition_tbl)
             end
-            
+
             local t = condition:get_type_definition()
 
             while t ~= nil do
@@ -2716,7 +2934,7 @@ local function save_tree(tree, filename)
             if tevent_hook then
                 tevent_hook:serialize(transition_event_tbl)
             end
-            
+
             local t = transition_event:get_type_definition()
 
             while t ~= nil do
@@ -2810,19 +3028,19 @@ local function load_tree(layer, tree, filename) -- tree is being written to in t
 
             return false
         end
-    
+
         log.debug("File has " .. tostring(#json_objects) .. " " .. metaname .. " objects")
-    
+
         -- Resize the objects array (actions, conditions, etc) to match the loaded tree.
         if tree_objects:size() < #json_objects then
             log.debug("Saved tree has more " .. metaname .. " objects than the current tree. Expanding tree...")
-    
+
             for i=tree_objects:size(), #json_objects-1 do
                 tree_objects:emplace()
             end
         elseif #json_objects < tree_objects:size() then
             log.debug("Saved tree has less " .. metaname .. " objects than the current tree. Shrinking tree...")
-    
+
             for i=#json_objects+1, tree_objects:size() do
                 tree_objects:pop_back()
             end
@@ -2838,13 +3056,13 @@ local function load_tree(layer, tree, filename) -- tree is being written to in t
         end
 
         local num_matching = 0
-        
+
         for i, object_tbl in ipairs(json_objects) do
             --log.debug(tostring(i) .. ": " .. tostring(object_tbl.type))
 
             local current_object = tree_objects[i-1]
             local new_object = nil
-            
+
             if current_object == nil then
                 new_object = sdk.create_instance(object_tbl.type):add_ref_permanent()
             else
@@ -2863,10 +3081,10 @@ local function load_tree(layer, tree, filename) -- tree is being written to in t
             end
 
             local t = new_object:get_type_definition()
-    
+
             assign_fields(new_object, t, object_tbl.fields)
             assign_properties(new_object, t, object_tbl.properties)
-    
+
             if new_object ~= current_object then
                 tree_objects[i-1] = new_object
             end
@@ -2884,7 +3102,7 @@ local function load_tree(layer, tree, filename) -- tree is being written to in t
         if not increase_array_size(metaname, json_integers, tree_integers) then
             return
         end
-    
+
         for i, integer in ipairs(json_integers) do
             tree_integers[i-1] = integer
         end
@@ -2929,18 +3147,18 @@ local function load_tree(layer, tree, filename) -- tree is being written to in t
 
             return false
         end
-    
+
 
         -- Resize the objects array (actions, conditions, etc) to match the loaded tree.
         if tree_objects:size() < #json_objects then
             log.debug("Saved Node " .. node_name .. " has more " .. metaname .. " objects than the current node. Expanding node...")
-    
+
             for i=tree_objects:size(), #json_objects-1 do
                 tree_objects:emplace()
             end
         elseif #json_objects < tree_objects:size() then
             log.debug("Saved Node " .. node_name .. " has fewer " .. metaname .. " objects than the current node. Shrinking node...")
-    
+
             for i=#json_objects+1, tree_objects:size() do
                 tree_objects:pop_back()
             end
@@ -2954,7 +3172,7 @@ local function load_tree(layer, tree, filename) -- tree is being written to in t
         if not increase_node_array_size(node_name, metaname, json_integers, node_integers) then
             return
         end
-    
+
         for i, integer in ipairs(json_integers) do
             node_integers[i-1] = integer
         end
@@ -3001,9 +3219,9 @@ local function load_tree(layer, tree, filename) -- tree is being written to in t
                         tree_node:get_data():get_transition_events()[j-1][k-1] = evt
                     end
                 end
-            end     
+            end
         end
-        
+
         -- Fix nonexistent transition events.
         if tree_node:get_data():get_transition_events():size() > 0 then
             for k=0, tree_node:get_data():get_transition_events():size()-1 do
@@ -3139,9 +3357,11 @@ local function draw_stupid_editor(name)
         if imgui.begin_menu("View") then
             changed, cfg.graph_closes_with_reframework = imgui.checkbox("Graph closes with REFramework", cfg.graph_closes_with_reframework)
             changed, cfg.show_side_panels = imgui.checkbox("Show side panel", cfg.show_side_panels)
+            changed, cfg.use_dynamic_side_panels = imgui.checkbox("Use dynamic side panel", cfg.use_dynamic_side_panels)
             changed, unlock_node_positioning = imgui.checkbox("Unlock Node Positioning", unlock_node_positioning)
+            changed, cfg.use_transition_positioning = imgui.checkbox("Use Transition Positioning", cfg.use_transition_positioning)
             changed, cfg.show_minimap = imgui.checkbox("Show Minimap", cfg.show_minimap)
-    
+
             changed, cfg.follow_active_nodes = imgui.checkbox("Follow Active Nodes", cfg.follow_active_nodes)
             changed, cfg.display_parent_of_active = imgui.checkbox("Display Parent of Active", cfg.display_parent_of_active)
             changed, cfg.parent_display_depth = imgui.slider_int("Parent Display Depth", cfg.parent_display_depth, 0, 10)
@@ -3359,7 +3579,7 @@ local function draw_stupid_editor(name)
                     imgui.same_line()
                     display_node(tree, node.node, tree:get_nodes(), node.i)
                 end
-    
+
                 for i, cond in ipairs(last_search_results_condition) do
                     display_condition(tree, nil, nil, tostring(cond.i) .. ": " .. cond.cond:get_type_definition():get_full_name(), cond.cond)
                 end
@@ -3384,7 +3604,7 @@ local function draw_stupid_editor(name)
 
             if imgui.begin_menu("Pan Settings") then
                 changed, cfg.pan_speed = imgui.slider_float("Pan Speed", cfg.pan_speed, 100.0, 5000.0)
-                
+
                 imgui.end_menu()
             end
 
@@ -3409,8 +3629,24 @@ local function draw_stupid_editor(name)
         local new_node = 0
         changed, new_node = imgui.drag_int("Display Node", cfg.default_node, 0, #custom_tree)
         if changed and tree ~= nil and new_node >= 0 and new_node < tree:get_node_count() then
+            push_visited_node(cfg.default_node)
             cfg.default_node = new_node
             queued_editor_id_move = {["i"] = cfg.default_node, ["id"] = tree:get_node(cfg.default_node):get_id()}
+        end
+
+        -- Go Back
+        imgui.separator()
+        local last_node = peek_last_node()
+        if tree ~= nil and last_node ~= -1 then
+            local node = tree:get_node(last_node)
+            if node ~= nil then
+                if imgui.button("Go back: [" .. tostring(last_node) .. "] " .. node:get_full_name()) then
+                    pop_visited_node()
+                    queued_editor_id_move = {["i"] = last_node, ["id"] = node:get_id()}
+                end
+            end
+        else
+            imgui.text("Go back: No visited nodes")
         end
 
         -- Selected layer
@@ -3453,7 +3689,7 @@ local function draw_stupid_editor(name)
 
         custom_tree = {}
         updated_tree = true
-        active_tree = tree        
+        active_tree = tree
 
         for i=0, tree:get_node_count()-1 do
             local node = tree:get_node(i)
@@ -3461,12 +3697,34 @@ local function draw_stupid_editor(name)
             if node then
                 local insertion = {
                     name = node:get_full_name(),
-                    children = {}
+                    children = {},
+                    start_states = {},
+                    states = {},
                 }
 
                 for j=0, #node:get_data():get_children()-1 do
                     local child_index = node:get_data():get_children()[j]
                     table.insert(insertion.children, child_index)
+                end
+
+                for j=0, #node:get_data():get_start_states()-1 do
+                    local index = node:get_data():get_start_states()[j]
+                    table.insert(insertion.start_states, index)
+
+                    if cached_node_referenced_by[index] == nil then
+                        cached_node_referenced_by[index] = {}
+                    end
+                    table.insert(cached_node_referenced_by[index], i)
+                end
+
+                for j=0, #node:get_data():get_states()-1 do
+                    local index = node:get_data():get_states()[j]
+                    table.insert(insertion.states, index)
+
+                    if cached_node_referenced_by[index] == nil then
+                        cached_node_referenced_by[index] = {}
+                    end
+                    table.insert(cached_node_referenced_by[index], i)
                 end
 
                 table.sort(insertion.children)
@@ -3480,9 +3738,9 @@ local function draw_stupid_editor(name)
         local ws = imgui.get_window_size()
 
         local made_child = false
-        
-        if was_hovering_sidebar then
-            made_child = imgui.begin_child_window("SidePanel",  Vector2f.new(math.max(ws.x / 4, SIDEBAR_BASE_WIDTH), 0), true, 1 << 6)
+
+        if cfg.use_dynamic_side_panels or was_hovering_sidebar then
+            made_child = imgui.begin_child_window("SidePanel",  Vector2f.new(math.max(ws.x / 3.5, SIDEBAR_BASE_WIDTH), 0), true, 1 << 6)
         else
             made_child = imgui.begin_child_window("SidePanel",  Vector2f.new(math.min(ws.x / 8, SIDEBAR_BASE_WIDTH), 0), true, 1 << 6)
         end
@@ -3555,7 +3813,7 @@ local function draw_stupid_editor(name)
 
             queued_editor_id_move = nil
         end
-        
+
         local already_has_good_active = false
 
         if prev_active_node ~= 0 then
@@ -3659,7 +3917,7 @@ re.on_frame(function()
     local disp_size = imgui.get_display_size()
     imgui.set_next_window_size({EDITOR_SIZE.x, EDITOR_SIZE.y}, 1 << 1) -- ImGuiCond_Once
     imgui.set_next_window_pos({disp_size.x / 2 - (EDITOR_SIZE.x / 2), disp_size.y / 2 - (EDITOR_SIZE.y / 2)}, 1 << 1)
-    draw_stupid_editor("Behavior Tree Editor v0.1337")
+    draw_stupid_editor("Behavior Tree Editor v0.1338")
 
     last_time = os.clock()
 
