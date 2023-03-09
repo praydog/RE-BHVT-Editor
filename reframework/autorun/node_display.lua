@@ -6,6 +6,21 @@ local imnodes = imnodes
 local sdk = sdk
 local json = json
 
+local FONT_NAME = 'NotoSansSC-Bold.otf'
+local FONT_SIZE = 18
+local CJK_GLYPH_RANGES = {
+	0x0020, 0x00FF, -- Basic Latin + Latin Supplement
+	0x2000, 0x206F, -- General Punctuation
+	0x3000, 0x30FF, -- CJK Symbols and Punctuations, Hiragana, Katakana
+	0x31F0, 0x31FF, -- Katakana Phonetic Extensions
+	0xFF00, 0xFFEF, -- Half-width characters
+	0x4e00, 0x9FAF, -- CJK Ideograms
+	0,
+}
+
+local font = imgui.load_font(FONT_NAME, FONT_SIZE, CJK_GLYPH_RANGES)
+
+
 if imnodes == nil or imgui.set_next_window_size == nil or sdk.hook_vtable == nil then
     re.msg("Your REFramework version is not new enough to use the behavior tree viewer!")
     return
@@ -616,6 +631,86 @@ end
 
 local replace_action_id_text = ""
 
+local enum_map_cache = {}
+local function get_enum_map(typename)
+    if enum_map_cache[typename] ~= nil then return enum_map_cache[typename] end
+
+    local t = sdk.find_type_definition(typename)
+    if not t then return nil end
+
+    local fields = t:get_fields()
+    local enum = {}
+
+    for i, field in ipairs(fields) do
+        if field:is_static() then
+            local name = field:get_name()
+            local raw_value = field:get_data(nil)
+            if enum[raw_value] ~= nil then
+                sdk.get_managed_singleton("snow.gui.ChatManager"):call("reqAddChatInfomation", tostring(raw_value) .. ": " .. name .. " conflict with " .. enum[raw_value] .. ", ignored", 2289944406)
+            else
+                enum[raw_value] = name
+            end
+        end
+    end
+
+    enum_map_cache[typename] = enum
+    return enum
+end
+
+local function get_enum_name(typename, value)
+    local map = get_enum_map(typename)
+    if map == nil then return "[NotFound]" end
+
+    if map[value] == nil then return "[NotFound]" end
+    return map[value]
+end
+
+local function handle_special_action_types(action)
+    local typename = action:get_type_definition():get_full_name()
+
+    if typename == "snow.PlayerPlayMotion2" then
+        local changed, val = imgui.drag_int("BankID", action:call("get_BankID"), 1, action:call("get_BankID"))
+        if changed then
+            action:call("set_BankID", val)
+        end
+
+        local changed, val = imgui.drag_int("MotionID", action:call("get_MotionID"), 1, action:call("get_MotionID"))
+        if changed then
+            action:call("set_MotionID", val)
+        end
+
+        local changed, val = imgui.drag_float("Speed", action:call("get_Speed"), 0.01, action:call("get_Speed"))
+        if changed then
+            action:call("set_Speed", val)
+        end
+
+    elseif typename == "snow.player.fsm.PlayerFsm2ActionSeeThroughAttack" then
+        local changed, val = imgui.drag_float("_StartFrame", action:get_field("_StartFrame"), 1, action:get_field("_StartFrame"))
+        if changed then
+            action:set_field("_StartFrame", val)
+        end
+        local changed, val = imgui.drag_float("_EndFrame", action:get_field("_EndFrame"), 1, action:get_field("_EndFrame"))
+        if changed then
+            action:set_field("_EndFrame", val)
+        end
+
+    elseif typename == "snow.player.fsm.PlayerFsm2ActionSetEffect" then
+        imgui.text(tostring(action:get_field("containerID")) .. ": " .. get_enum_name("snow.player.PlayerDefine.EffectContainerID", action:get_field("containerID")))
+        local changed, val = imgui.drag_int("containerID", action:get_field("containerID"), 1, action:get_field("containerID"))
+        if changed then
+            action:set_field("containerID", val)
+        end
+        local changed, val = imgui.drag_int("_ElementID", action:get_field("_ElementID"), 1, action:get_field("_ElementID"))
+        if changed then
+            action:set_field("_ElementID", val)
+        end
+        local changed, val = imgui.drag_float("_Frame", action:get_field("_Frame"), 1, action:get_field("_Frame"))
+        if changed then
+            action:set_field("_Frame", val)
+        end
+    end
+end
+
 local function display_action(tree, i, node, name, action)
     local enabled = action:call("get_Enabled")
     local status = enabled and "ON" or "OFF"
@@ -629,6 +724,8 @@ local function display_action(tree, i, node, name, action)
     imgui.same_line()
     imgui.text(name)
     if made then
+        handle_special_action_types(action)
+
         HookManager:get(action):display_hooks()
         --[[display_hook("Start", action_hooks.start, action, add_action_start_hook)
         display_hook("Update", action_hooks.update, action, add_action_update_hook)
@@ -753,6 +850,10 @@ local function display_event(tree, i, j, node, name, event)
 end
 
 local replace_condition_id_text = ""
+
+local function handle_special_condition(cond)
+
+end
 
 local function display_condition(tree, i, node, name, cond, target_node)
     local uvar = nil
@@ -1548,7 +1649,8 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                                 end
                             end,
                             function(j, element)
-                                if element == nil then
+                                imgui.text("Element: " .. tostring(element))
+                                if element == 0 or element == nil then
                                     return
                                 end
 
@@ -2103,6 +2205,7 @@ local unlock_node_positioning = false
 local function draw_link(active, id, attr_start, attr_end)
     if active then
         local alpha = math.floor(math.abs(math.sin(os.clock() * math.pi)) * 255)
+        -- 7 is ImNodesCol_Link, see https://github.com/Nelarius/imnodes/blob/master/imnodes.h
         imnodes.push_color_style(7, (alpha << 24) | 0x0000FF00)
         imnodes.link(id, attr_start, attr_end)
         imnodes.pop_color_style()
@@ -2125,6 +2228,7 @@ local function draw_stupid_node(name, custom_id, render_inputs_cb, render_output
 
     imnodes.begin_node(out.id)
 
+    -- 4 is ImNodesCol_TitleBar, see https://github.com/Nelarius/imnodes/blob/master/imnodes.h
     imnodes.begin_node_titlebar()
     imgui.text(name)
     imnodes.end_node_titlebar()
@@ -2279,6 +2383,10 @@ draw_node_children = function(i, node, seen, active)
     return out_dim_requirements, active
 end
 
+local function child_lookup(children_map_array, target_node)
+    
+end
+
 draw_node_children_by_transition = function(i, node, seen, active, root_node_child_map)
     seen = seen or {}
     if seen[node] then return end
@@ -2314,12 +2422,19 @@ draw_node_children_by_transition = function(i, node, seen, active, root_node_chi
         end
     end
 
-    local function draw_child_node(child_id, dangling)
+    local current_node_child_map = {}
+    for _, child_id in ipairs(node_descriptor.children) do
+        current_node_child_map[child_id] = { drawn = false }
+    end
+
+    local function draw_child_node(child_id, dangling, style_type)
         -- generally same as above
-        local child, node_dim_requirements, child_active = draw_node(child_id, seen, root_node_child_map, dangling)
+
+
+        local child, node_dim_requirements, child_active = draw_node(child_id, seen, root_node_child_map, dangling, style_type)
         -- Y needs to be dynamic
         local child_render_pos = {
-            x = node_pos.x + node_dims.x + 20,
+            x = node_pos.x + node_dims.x + 50,
             y = node_pos.y + out_dim_requirements.y
             --y = node_pos.y - ((#node_descriptor.children - 1) * (node_dims.y / 2)) + node_dim_requirements.y + ((j-1) * node_dims.y)
         }
@@ -2343,53 +2458,123 @@ draw_node_children_by_transition = function(i, node, seen, active, root_node_chi
             end
         end
 
-        local link_id = imgui.get_id(node_descriptor.name .. custom_tree[child_id].name .. "LINK")
-
         -- if node_is_hovered then
             -- if node_hovered_id == node_map[i].id then
-                draw_link(false, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
+                -- draw_link(false, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
             -- end
 
             -- if node_hovered_id == node_map[child_id].id then
-                draw_link(false, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
+                -- draw_link(false, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
             -- end
-        -- elseif active and child_active then
-            draw_link(active, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
-        -- end
+        if active and child_active then
+            -- draw_link(active, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
+        end
 
         out_dim_requirements.x = out_dim_requirements.x + node_dim_requirements.x
         out_dim_requirements.y = out_dim_requirements.y + node_dim_requirements.y --[[+ (imnodes.get_node_dimensions(child.id).y * #custom_tree[child_id].children)]]
         --out_dim_requirements.y = out.y + imnodes.get_node_dimensions(child_node.id).y
     end
 
+    local function draw_link_to(child_id, style_type)
+        -- We shouldn't use node name as link id, some nodes have the same name
+        -- for example, sacred sheath, 4213 and 4229, both are "atk.atk_161_MR.atk_316"
+        local link_id = imgui.get_id(i .. " to " .. child_id .. " LINK")
+        if style_type ~= "Dangling" and style_type ~= "StartState" and node_is_hovered and node_hovered_id == node.id then
+            draw_link(true, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
+        else
+            if style_type == "StartState" then
+                imnodes.push_color_style(7, 0xFF454580)
+            elseif style_type == "Dangling" then
+                imnodes.push_color_style(7, 0xFF666666)
+            end
+            draw_link(false, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
+            if style_type ~= nil then
+                imnodes.pop_color_style()
+            end
+        end
+    end
+
     local drawn_count = 0
     -- sdk.get_managed_singleton("snow.gui.ChatManager"):call("reqAddChatInfomation", "Drawing node " .. tostring(i), 2289944406)
     for j, start_state_id in ipairs(node_descriptor.start_states) do
-        if root_node_child_map[start_state_id] and not root_node_child_map[start_state_id].drawn then
-            -- is child, draw
-            root_node_child_map[start_state_id].drawn = true
+        if root_node_child_map[start_state_id] or current_node_child_map[start_state_id] then
+            if root_node_child_map[start_state_id] and not root_node_child_map[start_state_id].drawn then
+                -- is child, draw
+                root_node_child_map[start_state_id].drawn = true
 
-            draw_child_node(start_state_id)
-            drawn_count = drawn_count + 1
+                draw_child_node(start_state_id, nil, "StartState")
+
+                drawn_count = drawn_count + 1
+            elseif current_node_child_map[start_state_id] and not current_node_child_map[start_state_id].drawn then
+                current_node_child_map[start_state_id].drawn = true
+
+                draw_child_node(start_state_id, nil, "StartState")
+
+                drawn_count = drawn_count + 1
+            end
+            draw_link_to(start_state_id, "StartState")
+            -- imnodes.push_color_style(7, 0xFF454580)
+            -- -- the exit state drawn in other nodes. Link it
+            -- local link_id = imgui.get_id(i .. " to " .. start_state_id .. " LINK")
+            -- -- local link_id = imgui.get_id(node_descriptor.name .. custom_tree[start_state_id].name .. "LINK")
+            -- if node_is_hovered and node_hovered_id == node.id then
+            --     draw_link(true, link_id, node_map[i].outputs[1], node_map[start_state_id].inputs[1])
+            -- else
+            --     draw_link(false, link_id, node_map[i].outputs[1], node_map[start_state_id].inputs[1])
+            -- end
+            -- imnodes.pop_color_style()
         end
     end
 
     for j, state_id in ipairs(node_descriptor.states) do
-        if root_node_child_map[state_id] and not root_node_child_map[state_id].drawn then
-            -- is child, draw
-            root_node_child_map[state_id].drawn = true
+        if root_node_child_map[state_id] or current_node_child_map[state_id] then
+            if root_node_child_map[state_id] and not root_node_child_map[state_id].drawn then
+                -- is child, draw
+                root_node_child_map[state_id].drawn = true
 
-            draw_child_node(state_id)
-            drawn_count = drawn_count + 1
+                draw_child_node(state_id)
+                drawn_count = drawn_count + 1
+            elseif current_node_child_map[state_id] and not current_node_child_map[state_id].drawn then
+                current_node_child_map[state_id].drawn = true
+
+                draw_child_node(state_id)
+                drawn_count = drawn_count + 1
+            end
+            draw_link_to(state_id)
+            -- the exit state drawn in other nodes. Link it
+            -- We shouldn't use node name as link id, some nodes have the same name
+            -- for example, sacred sheath, 4213 and 4229, both are "atk.atk_161_MR.atk_316"
+            -- local link_id = imgui.get_id(i .. " to " .. state_id .. " LINK")
+            -- if node_is_hovered and node_hovered_id == node.id  then
+            --     draw_link(true, link_id, node_map[i].outputs[1], node_map[state_id].inputs[1])
+            -- else
+            --     draw_link(false, link_id, node_map[i].outputs[1], node_map[state_id].inputs[1])
+            -- end
         end
     end
 
     for j, child_id in ipairs(node_descriptor.children) do
-        if root_node_child_map[child_id] and not root_node_child_map[child_id].drawn then
-            root_node_child_map[child_id].drawn = true
+        -- two cases here
+        -- 1. the child belongs to the root node and the node is referencing it, we shouldn't draw it multiple times
+        -- 2. the child belongs to one child of root node, in the first time (== nil) we should draw it
+        local drawn = (current_node_child_map[child_id] ~= nil and current_node_child_map[child_id].drawn)
+        drawn = drawn or (root_node_child_map[child_id] ~= nil and root_node_child_map[child_id].drawn)
+        if not drawn then
+            -- we don't care about the current node children drawn or not anymore
+            if root_node_child_map[child_id] ~= nil then
+                root_node_child_map[child_id].drawn = true
+            end
 
             draw_child_node(child_id, true)
             drawn_count = drawn_count + 1
+
+            -- local link_id = imgui.get_id(i .. " to " .. child_id .. " LINK")
+            -- if node_is_hovered and node_hovered_id == node.id  then
+            --     draw_link(true, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
+            -- else
+            --     draw_link(false, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
+            -- end
+            draw_link_to(child_id, "Dangling")
         end
     end
 
@@ -2397,6 +2582,9 @@ draw_node_children_by_transition = function(i, node, seen, active, root_node_chi
     -- if the node has no children, meaning it's the end of the chain
     if drawn_count == 0 then
         out_dim_requirements.y = out_dim_requirements.y + node_dims.y + 20
+
+        -- check if this leaf node transition to another root action, if so, render it
+        -- But they tend to be in large numbers.
     else
         if node_dims.y > out_dim_requirements.y then
             out_dim_requirements.y = node_dims.y + 5
@@ -2406,7 +2594,30 @@ draw_node_children_by_transition = function(i, node, seen, active, root_node_chi
     return out_dim_requirements, active
 end
 
-draw_node = function(i, seen, valid_node_map, dangling)
+local function node_can_exit_from_root(i, valid_node_map)
+    -- this function cannot detect such case:
+    -- 1. Root children ABC
+    -- 2. A children DEF
+    -- 3. C ref to DEF
+
+    local current_node_child_map = {}
+    for _, child_id in ipairs(custom_tree[i].children) do
+        current_node_child_map[child_id] = { drawn = false }
+    end
+    for _, id in ipairs(custom_tree[i].start_states) do
+        if current_node_child_map[id] == nil and valid_node_map[id] == nil then
+            return true
+        end
+    end
+    for _, id in ipairs(custom_tree[i].states) do
+        if current_node_child_map[id] == nil and valid_node_map[id] == nil then
+            return true
+        end
+    end
+    return false
+end
+
+draw_node = function(i, seen, valid_node_map, is_dangling, style_type)
     seen = seen or {}
     if seen[i] then return end
     if not custom_tree[i] then return end
@@ -2424,7 +2635,31 @@ draw_node = function(i, seen, valid_node_map, dangling)
 
     local node_descriptor = custom_tree[i]
     local node_name = "[" .. tostring(i) .. "]" .. node_descriptor.name
-    if dangling then node_name = "[dangling] " .. node_name end
+    if is_dangling then node_name = "[dangling child] " .. node_name end
+
+    if valid_node_map ~= nil then
+        local is_exit_state = node_can_exit_from_root(i, valid_node_map)
+        if is_exit_state then
+            node_name = "[Exit] " .. node_name
+            style_type = "Exit"
+        end
+    end
+    -- predicate if the node is exit node
+
+    if is_dangling then
+        imnodes.push_color_style(4, 0xFFAA0075)
+        imnodes.push_color_style(5, 0xFFCC0089)
+        imnodes.push_color_style(6, 0xFFEE009F)
+    elseif style_type == "StartState" then
+        imnodes.push_color_style(4, 0xFF454580) -- normal title bar color
+        imnodes.push_color_style(5, 0xFF4545C0) -- hover color
+        imnodes.push_color_style(6, 0xFF4545EE) -- selected color
+    elseif style_type == "Exit" then
+        imnodes.push_color_style(4, 0xFF005780)
+        imnodes.push_color_style(5, 0xFF0077B0)
+        imnodes.push_color_style(6, 0xFF0090D0)
+    end
+
     local node = draw_standard_node(
         node_name,
         custom_id,
@@ -2440,6 +2675,11 @@ draw_node = function(i, seen, valid_node_map, dangling)
             end
         end
     )
+    if is_dangling or style_type ~= nil then
+        imnodes.pop_color_style()
+        imnodes.pop_color_style()
+        imnodes.pop_color_style()
+    end
 
     --[[if imgui.begin_popup_context_item(node_descriptor.name, 1) then
         if active_tree ~= nil then
@@ -3917,7 +4157,9 @@ re.on_frame(function()
     local disp_size = imgui.get_display_size()
     imgui.set_next_window_size({EDITOR_SIZE.x, EDITOR_SIZE.y}, 1 << 1) -- ImGuiCond_Once
     imgui.set_next_window_pos({disp_size.x / 2 - (EDITOR_SIZE.x / 2), disp_size.y / 2 - (EDITOR_SIZE.y / 2)}, 1 << 1)
-    draw_stupid_editor("Behavior Tree Editor v0.1338")
+    imgui.push_font(font)
+    draw_stupid_editor("Behavior Tree Editor v0.1337")
+    imgui.pop_font()
 
     last_time = os.clock()
 
