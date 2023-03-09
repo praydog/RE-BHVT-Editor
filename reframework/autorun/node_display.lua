@@ -4490,7 +4490,7 @@ re.on_frame(function()
 end)
 
 -- TODO:
--- Refresh nodes, links (and node_map cache) after edit
+-- Refresh nodes, links, reference relationships (and node_map cache) after edit
 -- Global Index indicator for Actions and Conditions
 -- fix Active Link
 -- Start State Transition edit
