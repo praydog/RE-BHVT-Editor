@@ -1276,95 +1276,95 @@ local function display_node(tree, node, node_array, node_array_idx, cond, prefix
             display_condition(tree, node_array_idx, node, cond:get_type_definition():get_full_name(), cond)
         end
 
-        if imgui.tree_node("Meta") then
-            imgui.text("Is Branch: " .. tostring(node_data.is_branch))
+        -- if imgui.tree_node("Meta") then
+        --     imgui.text("Is Branch: " .. tostring(node_data.is_branch))
 
-            local function display_single_node(val, name)
-                if val == nil then return end
+        --     local function display_single_node(val, name)
+        --         if val == nil then return end
 
-                imgui.text(name .. ": ")
-                imgui.same_line()
-                display_node(tree, val)
+        --         imgui.text(name .. ": ")
+        --         imgui.same_line()
+        --         display_node(tree, val)
 
-                -- imgui.same_line()
-                -- if imgui.button("make it null") then
-                -- end
-            end
-            local function display_single_condition(val, name)
-                if val == nil then return end
+        --         -- imgui.same_line()
+        --         -- if imgui.button("make it null") then
+        --         -- end
+        --     end
+        --     local function display_single_condition(val, name)
+        --         if val == nil then return end
 
-                imgui.text(name .. ": ")
-                imgui.same_line()
-                display_condition(tree, val)
+        --         imgui.text(name .. ": ")
+        --         imgui.same_line()
+        --         display_condition(tree, val)
 
-                -- imgui.same_line()
-                -- if imgui.button("make it null") then
-                -- end
-            end
-            display_single_node(node:get_node_end(), "NodeEnd")
-            display_single_node(node:get_node_restart(), "NodeRestart")
-            display_single_node(node:get_node_end_notify(), "NodeEndNotify")
-            display_single_node(node:get_node_end_selector(), "NodeEndSelector")
-            display_single_node(node:get_node_active_child(), "NodeActiveChild")
+        --         -- imgui.same_line()
+        --         -- if imgui.button("make it null") then
+        --         -- end
+        --     end
+        --     display_single_node(node:get_node_end(), "NodeEnd")
+        --     display_single_node(node:get_node_restart(), "NodeRestart")
+        --     display_single_node(node:get_node_end_notify(), "NodeEndNotify")
+        --     display_single_node(node:get_node_end_selector(), "NodeEndSelector")
+        --     display_single_node(node:get_node_active_child(), "NodeActiveChild")
 
-            -- display_single_condition(node:get_selector_condition(), "SelectorCondition")
-            -- display_single_node(node:get_selector_condition_index(), "SelectorConditionIndex")
-            -- display_single_node(node:get_parent_condition(), "ParentCondition")
-            -- display_single_condition(node:get_parent_condition_index(), "ParentConditionIndex")
+        --     -- display_single_condition(node:get_selector_condition(), "SelectorCondition")
+        --     -- display_single_node(node:get_selector_condition_index(), "SelectorConditionIndex")
+        --     -- display_single_node(node:get_parent_condition(), "ParentCondition")
+        --     -- display_single_condition(node:get_parent_condition_index(), "ParentConditionIndex")
 
-            imgui.text("Status: " .. STATUS_ENUM[node:get_status1()] .. ", " .. STATUS_ENUM[node:get_status2()])
-            imgui.same_line()
-            if imgui.button("make it enabled") then
-                node:as_memoryview():write_dword(0x64, 0)
-                node:as_memoryview():write_dword(0x68, 0)
-            end
+        --     imgui.text("Status: " .. STATUS_ENUM[node:get_status1()] .. ", " .. STATUS_ENUM[node:get_status2()])
+        --     imgui.same_line()
+        --     if imgui.button("make it enabled") then
+        --         node:as_memoryview():write_dword(0x64, 0)
+        --         node:as_memoryview():write_dword(0x68, 0)
+        --     end
 
-            imgui.text("Is End: " .. tostring(node_data.is_end))
-            local addr = tostring(node:as_memoryview():read_qword(0x20))
+        --     imgui.text("Is End: " .. tostring(node_data.is_end))
+        --     local addr = tostring(node:as_memoryview():read_qword(0x20))
 
-            local selector = node:get_selector()
-            if selector ~= nil then
-                imgui.text("Selector: " .. tostring(node_data.has_selector) .. ", address: " .. addr .. " " .. selector:get_type_definition():get_full_name())
-                imgui.same_line()
-            else
-                imgui.text("Selector: is nil")
-                imgui.same_line()
-            end
-            local has_selector = node_data.has_selector
-            changed, has_selector = imgui.checkbox("Has selector", node_data.has_selector)
-            if changed then
-                node_data.has_selector = has_selector
-                -- 0xc
-            end
+        --     local selector = node:get_selector()
+        --     if selector ~= nil then
+        --         imgui.text("Selector: " .. tostring(node_data.has_selector) .. ", address: " .. addr .. " " .. selector:get_type_definition():get_full_name())
+        --         imgui.same_line()
+        --     else
+        --         imgui.text("Selector: is nil")
+        --         imgui.same_line()
+        --     end
+        --     local has_selector = node_data.has_selector
+        --     changed, has_selector = imgui.checkbox("Has selector", node_data.has_selector)
+        --     if changed then
+        --         node_data.has_selector = has_selector
+        --         -- 0xc
+        --     end
 
-            if selector ~= nil then
-                object_explorer:handle_address(selector)
+        --     if selector ~= nil then
+        --         object_explorer:handle_address(selector)
 
-            --    if selector:get_owner_node() ~= nil then
-            --         imgui.text("Owner: ")
-            --         imgui.same_line()
-            --         display_node(tree, selector:get_owner_node())
-            --    end 
-            end
-            local copyFromNode = ""
-            -- changed, newAddrStr = imgui.input_text("[WARN] Replace selector from address", addr)
-            -- if changed then
-            --     node:as_memoryview():write_qword(0x20,  tonumber(newAddrStr))
-            -- end
+        --     --    if selector:get_owner_node() ~= nil then
+        --     --         imgui.text("Owner: ")
+        --     --         imgui.same_line()
+        --     --         display_node(tree, selector:get_owner_node())
+        --     --    end 
+        --     end
+        --     local copyFromNode = ""
+        --     -- changed, newAddrStr = imgui.input_text("[WARN] Replace selector from address", addr)
+        --     -- if changed then
+        --     --     node:as_memoryview():write_qword(0x20,  tonumber(newAddrStr))
+        --     -- end
 
-            changed, copyFromNode = imgui.input_text("Copy selector from node", copyFromNode, 1 << 5)
-            if changed then
-                local selector = tree:get_node(tonumber(copyFromNode)):get_selector()
-                if selector ~= nil then
-                    first_times = {}
-                    local selector_t = selector:get_type_definition()
-                    local new_selector = selector_t:create_instance():add_ref_permanent()
-                    node:as_memoryview():write_qword(0x20,  new_selector:get_address())
-                end
-            end
+        --     changed, copyFromNode = imgui.input_text("Copy selector from node", copyFromNode, 1 << 5)
+        --     if changed then
+        --         local selector = tree:get_node(tonumber(copyFromNode)):get_selector()
+        --         if selector ~= nil then
+        --             first_times = {}
+        --             local selector_t = selector:get_type_definition()
+        --             local new_selector = selector_t:create_instance():add_ref_permanent()
+        --             node:as_memoryview():write_qword(0x20,  new_selector:get_address())
+        --         end
+        --     end
 
-            imgui.tree_pop()
-        end
+        --     imgui.tree_pop()
+        -- end
 
         local parent = node:get_parent()
         if parent ~= nil then
