@@ -6,21 +6,6 @@ local imnodes = imnodes
 local sdk = sdk
 local json = json
 
-local FONT_NAME = 'NotoSansSC-Bold.otf'
-local FONT_SIZE = 18
-local CJK_GLYPH_RANGES = {
-	0x0020, 0x00FF, -- Basic Latin + Latin Supplement
-	0x2000, 0x206F, -- General Punctuation
-	0x3000, 0x30FF, -- CJK Symbols and Punctuations, Hiragana, Katakana
-	0x31F0, 0x31FF, -- Katakana Phonetic Extensions
-	0xFF00, 0xFFEF, -- Half-width characters
-	0x4e00, 0x9FAF, -- CJK Ideograms
-	0,
-}
-
-local font = imgui.load_font(FONT_NAME, FONT_SIZE, CJK_GLYPH_RANGES)
-
-
 if imnodes == nil or imgui.set_next_window_size == nil or sdk.hook_vtable == nil then
     re.msg("Your REFramework version is not new enough to use the behavior tree viewer!")
     return
@@ -180,6 +165,18 @@ local custom_tree = {
     }
 }
 
+local STATUS_ENUM = {
+    [0] = "Enabled",
+    [1] = "DivideReserved",
+    [2] = "Dividing",
+    [3] = "Extended",
+    [4] = "Unload",
+    [5] = "5",
+    [6] = "6",
+    [7] = "7",
+    [8] = "MAX",
+}
+
 local function recreate_globals()
     custom_tree = {}
     cached_node_names = {}
@@ -197,6 +194,10 @@ local function recreate_globals()
     node_names = {}
     first_times = {}
     sort_dict = {}
+end
+
+local function send_message(text)
+    sdk.get_managed_singleton("snow.gui.ChatManager"):call("reqAddChatInfomation", text, 2289944406)
 end
 
 local node_replacements = {
@@ -218,10 +219,11 @@ local cfg = {
     follow_active_nodes = false,
     display_parent_of_active = true,
     parent_display_depth = 0,
-    default_node = 0,
+    default_node = 1,
     show_side_panels = true,
     use_dynamic_side_panels = true,
     use_transition_positioning = true,
+    display_all_states_link = true,
     graph_closes_with_reframework = true,
 
     -- editor
@@ -281,7 +283,7 @@ re.on_config_save(function()
     json.dump_file(cfg_path, cfg)
 end)
 
-local function get_cached_node_index_by_id(tree, node)
+local function get_cached_node_index(tree, node)
     return cached_node_indices[tree][node:as_memoryview():address()]
 end
 
@@ -321,7 +323,7 @@ local function create_new_node(core, tree, i)
 
                 if ptr == selector:get_address() then
                     log.debug(string.format("Found selector pointer at %x", j))
-                    last_node:as_memoryview():write_qword(j, new_selector:get_address())
+                    tree:get_nodes()[tree:get_nodes():size()-1]:as_memoryview():write_qword(j, new_selector:get_address())
                     break
                 end
             end
@@ -665,49 +667,56 @@ local function get_enum_name(typename, value)
     return map[value]
 end
 
+local function quick_editor_reflect_int_field(obj, field_name, enum_type)
+    if enum_type ~= nil then
+        imgui.text(tostring(obj:call("get_" .. field_name)) .. ": " .. get_enum_name(enum_type, obj:call("get_" .. field_name)))
+    end
+    local changed, val = imgui.drag_int(field_name, obj:call("get_" .. field_name), 1, obj:call("get_" .. field_name))
+    if changed then
+        obj:call("set_" .. field_name, val)
+    end
+end
+
+local function quick_editor_reflect_float_field(obj, field_name, step)
+    local changed, val = imgui.drag_float(field_name, obj:call("get_" .. field_name), step, obj:call("get_" .. field_name))
+    if changed then
+        obj:call("set_" .. field_name, val)
+    end
+end
+
+local function quick_editor_tdb_int_field(obj, field_name, enum_type)
+    if enum_type ~= nil then
+        imgui.text(tostring(obj:get_field(field_name)) .. ": " .. get_enum_name(enum_type, obj:get_field(field_name)))
+    end
+    local changed, val = imgui.drag_int(field_name, obj:get_field(field_name), 1, obj:get_field(field_name))
+    if changed then
+        obj:set_field(field_name, val)
+    end
+end
+
+local function quick_editor_tdb_float_field(obj, field_name, step)
+    local changed, val = imgui.drag_float(field_name, obj:get_field(field_name), step, obj:get_field(field_name))
+    if changed then
+        obj:set_field(field_name, val)
+    end
+end
+
 local function handle_special_action_types(action)
+    imgui.text("Quick Edit Actions")
+
     local typename = action:get_type_definition():get_full_name()
 
     if typename == "snow.PlayerPlayMotion2" then
-        local changed, val = imgui.drag_int("BankID", action:call("get_BankID"), 1, action:call("get_BankID"))
-        if changed then
-            action:call("set_BankID", val)
-        end
-
-        local changed, val = imgui.drag_int("MotionID", action:call("get_MotionID"), 1, action:call("get_MotionID"))
-        if changed then
-            action:call("set_MotionID", val)
-        end
-
-        local changed, val = imgui.drag_float("Speed", action:call("get_Speed"), 0.01, action:call("get_Speed"))
-        if changed then
-            action:call("set_Speed", val)
-        end
-
+        quick_editor_reflect_int_field(action, "BankID")
+        quick_editor_reflect_int_field(action, "MotionID")
+        quick_editor_reflect_float_field(action, "Speed", 0.01)
     elseif typename == "snow.player.fsm.PlayerFsm2ActionSeeThroughAttack" then
-        local changed, val = imgui.drag_float("_StartFrame", action:get_field("_StartFrame"), 1, action:get_field("_StartFrame"))
-        if changed then
-            action:set_field("_StartFrame", val)
-        end
-        local changed, val = imgui.drag_float("_EndFrame", action:get_field("_EndFrame"), 1, action:get_field("_EndFrame"))
-        if changed then
-            action:set_field("_EndFrame", val)
-        end
-
+        quick_editor_tdb_float_field(action, "_StartFrame", 1)
+        quick_editor_tdb_float_field(action, "_EndFrame", 1)
     elseif typename == "snow.player.fsm.PlayerFsm2ActionSetEffect" then
-        imgui.text(tostring(action:get_field("containerID")) .. ": " .. get_enum_name("snow.player.PlayerDefine.EffectContainerID", action:get_field("containerID")))
-        local changed, val = imgui.drag_int("containerID", action:get_field("containerID"), 1, action:get_field("containerID"))
-        if changed then
-            action:set_field("containerID", val)
-        end
-        local changed, val = imgui.drag_int("_ElementID", action:get_field("_ElementID"), 1, action:get_field("_ElementID"))
-        if changed then
-            action:set_field("_ElementID", val)
-        end
-        local changed, val = imgui.drag_float("_Frame", action:get_field("_Frame"), 1, action:get_field("_Frame"))
-        if changed then
-            action:set_field("_Frame", val)
-        end
+        quick_editor_tdb_float_field(action, "containerID", "snow.player.PlayerDefine.EffectContainerID")
+        quick_editor_tdb_int_field(action, "_ElementID")
+        quick_editor_tdb_float_field(action, "_Frame", 1)
     end
 end
 
@@ -720,7 +729,7 @@ local function display_action(tree, i, node, name, action)
     end
 
     imgui.same_line()
-    local made = imgui.tree_node(tostring(i) .. ": ")
+    local made = imgui.tree_node(tostring(i) .. ": [" .. tostring(node:get_data():get_actions()[i]) .. "]")
     imgui.same_line()
     imgui.text(name)
     if made then
@@ -852,10 +861,35 @@ end
 local replace_condition_id_text = ""
 
 local function handle_special_condition(cond)
+    imgui.text("Quick Edit Condition")
 
+    local typename = cond:get_type_definition():get_full_name()
+
+    if typename == "snow.player.fsm.PlayerFsm2CommandLongSword" then
+        quick_editor_tdb_float_field(cond, "_Gauge", 1)
+        quick_editor_tdb_int_field(cond, "_GaugeLv", "snow.player.LongSword.LongSwordKijin")
+
+        quick_editor_tdb_float_field(cond, "StartFrame", 1)
+        quick_editor_tdb_float_field(cond, "EndFrame", 1)
+        quick_editor_tdb_float_field(cond, "PreFrame", 1)
+
+        quick_editor_tdb_int_field(cond, "atkType", "snow.player.fsm.FsmCommandBase.ReplaceAtkType")
+        quick_editor_tdb_int_field(cond, "replaceType", "snow.player.PlayerBase.ReplaceAttackType")
+
+        quick_editor_tdb_int_field(cond, "CmdType", "snow.player.fsm.FsmCommandBase.CommandFsm")
+    elseif typename == "snow.player.fsm.PlayerFsm2Command" then
+        quick_editor_tdb_float_field(cond, "StartFrame", 1)
+        quick_editor_tdb_float_field(cond, "EndFrame", 1)
+        quick_editor_tdb_float_field(cond, "PreFrame", 1)
+
+        quick_editor_tdb_int_field(cond, "atkType", "snow.player.fsm.FsmCommandBase.ReplaceAtkType")
+        quick_editor_tdb_int_field(cond, "replaceType", "snow.player.PlayerBase.ReplaceAttackType")
+
+        quick_editor_tdb_int_field(cond, "CmdType", "snow.player.fsm.FsmCommandBase.CommandFsm")
+    end
 end
 
-local function display_condition(tree, i, node, name, cond, target_node)
+local function display_condition(tree, i, node, name, cond, target_node, condition_type)
     local uvar = nil
 
     if cond ~= nil then
@@ -887,6 +921,8 @@ local function display_condition(tree, i, node, name, cond, target_node)
     end
 
     if made_node then
+        handle_special_condition(cond)
+
         HookManager:get(cond):display_hooks()
 
         if cond ~= nil then
@@ -913,20 +949,34 @@ local function display_condition(tree, i, node, name, cond, target_node)
                 end
             end
 
-            changed, selection = imgui.combo("Replace Condition", selection, condition_name_map[tree])
+            if condition_type ~= nil then
+                changed, selection = imgui.combo("Replace Condition", selection, condition_name_map[tree])
 
-            if changed then
-                first_times = {}
+                if changed then
+                    first_times = {}
 
-                node:get_data():get_transition_conditions()[i] = condition_map[tree][selection].index
-                condition_selection_map[tree][i] = selection
-            end
+                    if condition_type == "state" then
+                        node:get_data():get_transition_conditions()[i] = condition_map[tree][selection].index
+                    elseif condition_type == "start_state" then
+                        node:get_data():get_start_transitions()[i] = condition_map[tree][selection].index
+                    elseif condition_type == "condition" then
+                        node:get_data():get_conditions()[i] = condition_map[tree][selection].index
+                    end
+                    condition_selection_map[tree][i] = selection
+                end
 
-            changed, replace_condition_id_text = imgui.input_text("Replace Condition by ID", replace_condition_id_text, 1 << 5)
+                changed, replace_condition_id_text = imgui.input_text("Replace Condition by ID", replace_condition_id_text, 1 << 5)
 
-            if changed then
-                first_times = {}
-                node:get_data():get_transition_conditions()[i] = tonumber(replace_condition_id_text)
+                if changed then
+                    first_times = {}
+                    if condition_type == "state" then
+                        node:get_data():get_transition_conditions()[i] = tonumber(replace_condition_id_text)
+                    elseif condition_type == "start_state" then
+                        node:get_data():get_start_transitions()[i] = tonumber(replace_condition_id_text)
+                    elseif condition_type == "condition" then
+                        node:get_data():get_conditions()[i] = tonumber(replace_condition_id_text)
+                    end
+                end
             end
 
         end
@@ -1052,7 +1102,7 @@ local function display_node_replacement(text, tree, node, node_array, node_array
 
         if changed then
             local target_node = node_map[tree][selection]
-            node_array[node_array_idx] = get_cached_node_index_by_id(tree, target_node)
+            node_array[node_array_idx] = get_cached_node_index(tree, target_node)
             selection_map[tree][node:get_id()] = selection
         end
     end
@@ -1073,7 +1123,7 @@ local function display_node_addition(text, tree, node, node_array)
 
         if changed then
             local target_node = node_map[tree][selection]
-            node_array:push_back(get_cached_node_index_by_id(tree, target_node))
+            node_array:push_back(get_cached_node_index(tree, target_node))
             selection_map[tree][node:get_id()] = selection
 
             -- add dummy (-1) transitions so the game doesn't crash
@@ -1094,8 +1144,17 @@ local add_child_id_text = "0"
 
 local queued_editor_id_move = nil
 
-local function display_node(tree, node, node_array, node_array_idx, cond)
+-- node_array: can be null. use to "Replace Node"
+-- node_array_idx: can be null. use to "Replace Node" and display condition
+-- cond: can be null. use to generate conditoon postfix
+-- prefix_func: can be null. use to generate prefix
+local function display_node(tree, node, node_array, node_array_idx, cond, prefix_func)
     local changed = false
+
+    if node == nil then
+        imgui.text("Failed to draw child (nil node) ")
+        return
+    end
 
     imgui.push_id(node:get_id())
 
@@ -1125,21 +1184,59 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
 
     imgui.same_line()
 
-    imgui.text("["..tostring(node_array_idx).."]")
-    imgui.same_line()
+    if node_array_idx ~= nil then
+        imgui.text("["..tostring(node_array_idx).."]")
+        imgui.same_line()
+    end
 
-    local node_name = get_cached_node_index_by_id(tree, node) .. ": " .. node:get_full_name()
+    if prefix_func ~= nil then
+        prefix_func()
+    end
+
+    local idx = get_cached_node_index(tree, node)
+    local node_name = node:get_full_name()
+    if idx == nil then
+        node_name = node_name .. " [cache outdated, please reset script]"
+    else
+        node_name = idx .. ": " .. node_name
+    end
 
     local made_node = imgui.tree_node(node_name)
 
     if cond ~= nil then
         imgui.same_line()
-        imgui.text_colored("[" .. cond:get_type_definition():get_full_name() .. "]", 0xFF00FF00)
+        local type = cond:get_type_definition():get_full_name()
+        local text = ""
+
+        local function handleCmdType()
+            local atkType = cond:get_field("atkType")
+            if atkType ~= 0 then
+                text = text .. " | Replace " .. tostring(atkType) .. "=" .. tostring(cond:get_field("replaceType"))
+            end
+
+            local keyName = get_enum_name("snow.player.fsm.FsmCommandBase.CommandFsm", cond:get_field("CmdType"))
+
+            text = keyName .. " in [ " .. tostring(cond:get_field("StartFrame")) .. ", " .. tostring(cond:get_field("EndFrame")) .. " ]/ " .. tostring(cond:get_field("PreFrame")) .. text
+        end
+
+        if type == "snow.player.fsm.PlayerFsm2CommandLongSword" then
+            text = text .. " | GaugeLv" .. tostring(cond:get_field("_GaugeLv")) .. ", Gauge " .. tostring(cond:get_field("_Gauge"))
+            handleCmdType()
+        elseif type == "snow.player.fsm.PlayerFsm2Command" then
+            handleCmdType()
+        elseif type == "via.motion.Fsm2ConditionMotionEnd" then
+            text = "MotionEnd"
+        else
+            text = type
+        end
+        imgui.text_colored("[" ..  text .. "]", 0xFF00FF00)
     end
 
-    if made_node then
-        local node_data = node:get_data()
-
+    local node_data = node:get_data()
+    if node_data == nil then
+        imgui.text("Node data is nil!")
+    end
+    if node_data ~= nil and made_node then
         local changed, new_node_name = imgui.input_text("Change Name", node:get_name(), 1 << 5)
 
         if changed then
@@ -1150,7 +1247,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
 
         imgui.input_text("Address", string.format("%X", node:as_memoryview():get_address()))
 
-        if node_array ~= nil then
+        if node_array ~= nil and node_array_idx ~= nil then
             display_node_replacement("Replace Node", tree, node, node_array, node_array_idx)
 
             changed, replace_node_id_text = imgui.input_text("Replace Node ID by ID", replace_node_id_text, 1 << 5)
@@ -1175,8 +1272,106 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             node:as_memoryview():write_qword(0x20, selector:get_address())
         end
 
-        if cond ~= nil then
+        if cond ~= nil and node_array_idx ~= nil then
             display_condition(tree, node_array_idx, node, cond:get_type_definition():get_full_name(), cond)
+        end
+
+        if imgui.tree_node("Meta") then
+            imgui.text("Is Branch: " .. tostring(node_data.is_branch))
+
+            local function display_single_node(val, name)
+                if val == nil then return end
+
+                imgui.text(name .. ": ")
+                imgui.same_line()
+                display_node(tree, val)
+
+                -- imgui.same_line()
+                -- if imgui.button("make it null") then
+                -- end
+            end
+            local function display_single_condition(val, name)
+                if val == nil then return end
+
+                imgui.text(name .. ": ")
+                imgui.same_line()
+                display_condition(tree, val)
+
+                -- imgui.same_line()
+                -- if imgui.button("make it null") then
+                -- end
+            end
+            display_single_node(node:get_node_end(), "NodeEnd")
+            display_single_node(node:get_node_restart(), "NodeRestart")
+            display_single_node(node:get_node_end_notify(), "NodeEndNotify")
+            display_single_node(node:get_node_end_selector(), "NodeEndSelector")
+            display_single_node(node:get_node_active_child(), "NodeActiveChild")
+
+            -- display_single_condition(node:get_selector_condition(), "SelectorCondition")
+            -- display_single_node(node:get_selector_condition_index(), "SelectorConditionIndex")
+            -- display_single_node(node:get_parent_condition(), "ParentCondition")
+            -- display_single_condition(node:get_parent_condition_index(), "ParentConditionIndex")
+
+            imgui.text("Status: " .. STATUS_ENUM[node:get_status1()] .. ", " .. STATUS_ENUM[node:get_status2()])
+            imgui.same_line()
+            if imgui.button("make it enabled") then
+                node:as_memoryview():write_dword(0x64, 0)
+                node:as_memoryview():write_dword(0x68, 0)
+            end
+
+            imgui.text("Is End: " .. tostring(node_data.is_end))
+            local addr = tostring(node:as_memoryview():read_qword(0x20))
+
+            local selector = node:get_selector()
+            if selector ~= nil then
+                imgui.text("Selector: " .. tostring(node_data.has_selector) .. ", address: " .. addr .. " " .. selector:get_type_definition():get_full_name())
+                imgui.same_line()
+            else
+                imgui.text("Selector: is nil")
+                imgui.same_line()
+            end
+            local has_selector = node_data.has_selector
+            changed, has_selector = imgui.checkbox("Has selector", node_data.has_selector)
+            if changed then
+                node_data.has_selector = has_selector
+                -- 0xc
+            end
+
+            if selector ~= nil then
+                object_explorer:handle_address(selector)
+
+            --    if selector:get_owner_node() ~= nil then
+            --         imgui.text("Owner: ")
+            --         imgui.same_line()
+            --         display_node(tree, selector:get_owner_node())
+            --    end 
+            end
+            local copyFromNode = ""
+            -- changed, newAddrStr = imgui.input_text("[WARN] Replace selector from address", addr)
+            -- if changed then
+            --     node:as_memoryview():write_qword(0x20,  tonumber(newAddrStr))
+            -- end
+
+            changed, copyFromNode = imgui.input_text("Copy selector from node", copyFromNode, 1 << 5)
+            if changed then
+                local selector = tree:get_node(tonumber(copyFromNode)):get_selector()
+                if selector ~= nil then
+                    first_times = {}
+                    local selector_t = selector:get_type_definition()
+                    local new_selector = selector_t:create_instance():add_ref_permanent()
+                    node:as_memoryview():write_qword(0x20,  new_selector:get_address())
+                end
+            end
+
+            imgui.tree_pop()
+        end
+
+        local parent = node:get_parent()
+        if parent ~= nil then
+            imgui.text("Parent: ")
+            imgui.same_line()
+            display_node(tree, parent)
+            -- imgui.text("Parent: [" .. get_cached_node_index(tree, parent) .. "]  " .. parent:get_full_name())
         end
 
         if imgui.tree_node("Children [" .. tostring(#node_data:get_children()) .. "]") then
@@ -1374,12 +1569,27 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 node_data:get_transition_attributes():push_back(0)
             end
 
+            local child_map = {}
+            for _, child_id in pairs(node:get_children()) do
+                child_map[get_cached_node_index(tree, child_id)] = true
+            end
+            local parent = node:get_parent()
+            if parent ~= nil then
+                for _, child_id in ipairs(parent:get_children()) do
+                    child_map[get_cached_node_index(tree, child_id)] = true
+                end
+            end
             display_bhvt_array(tree, node, node_data:get_states(), tree.get_node,
                 function(tree, i, node, element)
                     local conditions = node:get_data():get_transition_conditions()
                     local condition = tree:get_condition(conditions[i])
 
-                    display_node(tree, element, node_data:get_states(), i, condition)
+                    display_node(tree, element, node_data:get_states(), i, condition, function ()
+                        if child_map[node_data:get_states()[i]] then
+                            imgui.text_colored("*", 0xFF00FF00) -- FIXME: 233 wait 会标记，可能是因为 child_map 没有被清理
+                            imgui.same_line()
+                        end
+                    end)
                     imgui.same_line()
                     imgui.text("[" .. tostring(i) .. "]")
                 end,
@@ -1402,7 +1612,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
         --------------------------------------------------
         ----------- NODE TRANSITION CONDITONS ------------
         --------------------------------------------------
-        local draw_conditions = function(transition_array, transition_array_name, target_node_array)
+        local draw_conditions = function(transition_array, transition_array_name, target_node_array, condition_type)
             local changed = false
 
             if selection_map[tree] == nil then
@@ -1420,6 +1630,14 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 --node:append_action(action_map[tree][selection].index)
                 transition_array:push_back(condition_map[tree][selection].index)
                 selection_map[tree][node:get_id()] = selection
+            end
+
+            local input_condition_id_text = ""
+            changed, input_condition_id_text = imgui.input_text("Add Condition by ID", input_condition_id_text, 1 << 5)
+
+            if changed then
+                first_times = {}
+                transition_array:push_back(tonumber(input_condition_id_text))
             end
 
             changed, selection = imgui.combo("Copy from", selection, node_names[tree])
@@ -1453,13 +1671,31 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 -- display predicate
                 function(tree, i, node, element)
                     if element == nil then
-                        imgui.text(tostring(i) .. ": [ NULL -1 ]")
+                        local real_index = "-1"
+                        -- local conds = nil
+                        -- if condition_type == "state" then
+                        --     conds = node:get_data():get_transition_conditions()
+                        -- elseif condition_type == "start_state" then
+                        --     conds = node:get_data():get_start_transitions()
+                        -- elseif condition_type == "condition" then
+                        --     conds = node:get_data():get_conditions()
+                        -- end
+                        if transition_array ~= nil then
+                            real_index = tostring(transition_array[i])
+                        end
+                        imgui.text(tostring(i) .. ": [ NULL " .. real_index .. " ]")
                     else
                         local target_node = nil
                         if target_node_array ~= nil then
                             target_node = target_node_array[i]
                         end
-                        display_condition(tree, i, node, tostring(i) .. ": " .. element:get_type_definition():get_full_name(), element, target_node)
+                        name = tostring(i)
+                        -- local trans = node:get_data():get_transition_conditions()[i]
+                        local trans = transition_array[i]
+                        if trans ~= nil then
+                            name = name .. ": [" .. trans .. "]  " .. element:get_type_definition():get_full_name()
+                        end
+                        display_condition(tree, i, node, name, element, target_node, condition_type)
                     end
                 end,
                 -- duplication predicate
@@ -1508,6 +1744,15 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
         if imgui.tree_node("Transition Start States [" .. tostring(#node_data:get_start_states()) .. "]") then
             display_node_addition("Add Start State", tree, node, node_data:get_start_states())
 
+            local start_state_input_text = ""
+            changed, start_state_input_text = imgui.input_text("Add Start State (ID)", start_state_input_text, 1 << 5)
+
+            if changed then
+                first_times = {}
+
+                node_data:get_start_states():push_back(tonumber(start_state_input_text))
+            end
+
             display_bhvt_array(tree, node, node_data:get_start_states(), tree.get_node,
             function(tree, i, node, element)
                 local conditions = node:get_data():get_start_transitions()
@@ -1518,7 +1763,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             imgui.tree_pop()
         end
 
-        if imgui.tree_node("Transition Start State Conditions [" .. tostring(#node_data:get_start_states()) .. "]") then
+        if imgui.tree_node("Transition Start State Conditions [" .. tostring(#node_data:get_start_transitions()) .. "]") then
             draw_conditions(node_data:get_start_transitions(), "get_start_transitions", node_data:get_start_states())
             imgui.tree_pop()
         end
@@ -1586,16 +1831,22 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                 end,
                 function(tree, i, node, element)
                     local evts = element
-                    local made = imgui.tree_node(tostring(i))
+                    local made = imgui.tree_node("[" .. tostring(i) .. "]") 
 
                     imgui.same_line()
-                    imgui.text("[" .. tostring(evts:size()) .. "]")
+                    if evts:size() == 0 then
+                        -- imgui.text("empty")
+                    else
+                        imgui.text(tostring(evts:size()) .. " events")
+                    end
 
                     imgui.same_line()
 
                     local state_index = node_data:get_states()[i]
 
-                    if state_index >= 0 and state_index < tree:get_node_count() then
+                    if state_index == nil then
+                        imgui.text_colored("[ NULL ]", 0xFF00FF00)
+                    elseif state_index >= 0 and state_index < tree:get_node_count() then
                         local state_name = get_node_full_name(tree:get_node(state_index))
                         imgui.text_colored("[" .. state_name .. "]", 0xFF00FF00)
                     end
@@ -1649,8 +1900,7 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
                                 end
                             end,
                             function(j, element)
-                                imgui.text("Element: " .. tostring(element))
-                                if element == 0 or element == nil then
+                                if element == nil then
                                     return
                                 end
 
@@ -1689,6 +1939,14 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
         end
 
         if imgui.tree_node("Tags [" .. tostring(#node_data:get_tags()) .. "]") then
+            local changed, add_tag_id = imgui.input_text("Add Tag", add_action_id_text, 1 << 5)
+
+            if changed then
+                first_times = {}
+
+                node_data:get_tags():push_back(tonumber(add_tag_id))
+            end
+
             display_bhvt_array(tree, node, node_data:get_tags(),
                 function(tree, x)
                     return x
@@ -1712,13 +1970,14 @@ local function display_node(tree, node, node_array, node_array_idx, cond)
             imgui.tree_pop()
         end
 
-        local current_index = get_cached_node_index_by_id(tree, node)
+        local current_index = get_cached_node_index(tree, node)
         local referenced_nodes = cached_node_referenced_by[current_index]
         if referenced_nodes ~= nil then
             if imgui.tree_node("Referenced by " .. #referenced_nodes .. " Nodes") then
                 for _, ref_by_node_index in pairs(referenced_nodes) do
                     display_node(tree, tree:get_node(ref_by_node_index), nil, ref_by_node_index)
                 end
+                imgui.tree_pop()
             end
         else
             imgui.text(tostring(current_index) .. " referenced by nothing.")
@@ -2110,6 +2369,7 @@ local function display_tree(core, tree)
 
     if imgui.tree_node("Root node") then
         display_node(tree, tree:get_node(0))
+        imgui.tree_pop()
     end
 end
 
@@ -2202,6 +2462,8 @@ end)
 
 local unlock_node_positioning = false
 
+local max_link_count = 100
+local current_link_count = 0
 local function draw_link(active, id, attr_start, attr_end)
     if active then
         local alpha = math.floor(math.abs(math.sin(os.clock() * math.pi)) * 255)
@@ -2210,8 +2472,10 @@ local function draw_link(active, id, attr_start, attr_end)
         imnodes.link(id, attr_start, attr_end)
         imnodes.pop_color_style()
     else
+        if current_link_count > max_link_count then return end
         imnodes.link(id, attr_start, attr_end)
     end
+    current_link_count = current_link_count + 1
 end
 
 local function draw_stupid_node(name, custom_id, render_inputs_cb, render_outputs_cb, render_after_cb)
@@ -2228,7 +2492,6 @@ local function draw_stupid_node(name, custom_id, render_inputs_cb, render_output
 
     imnodes.begin_node(out.id)
 
-    -- 4 is ImNodesCol_TitleBar, see https://github.com/Nelarius/imnodes/blob/master/imnodes.h
     imnodes.begin_node_titlebar()
     imgui.text(name)
     imnodes.end_node_titlebar()
@@ -2262,7 +2525,11 @@ local function draw_standard_node(name, custom_id, render_after_cb)
             end
 
             imnodes.begin_input_attribute(out2[1])
-            imgui.text("parent")
+            if cfg.use_transition_positioning then
+                imgui.text("from")
+            else
+                imgui.text("parent")
+            end
             imnodes.end_input_attribute()
 
             return out2
@@ -2277,8 +2544,13 @@ local function draw_standard_node(name, custom_id, render_after_cb)
             end
 
             imnodes.begin_output_attribute(out2[1])
-            imgui.indent(math.max(imgui.calc_text_size(name).x, 60))
-            imgui.text("children")
+            if cfg.use_transition_positioning then
+                imgui.indent(imgui.calc_text_size(name .. " Goto Run HOLDER").x)
+                imgui.text("to")
+            else
+                imgui.indent(math.max(imgui.calc_text_size(name).x, 60))
+                imgui.text("children")
+            end
             imnodes.end_output_attribute()
 
             return out2
@@ -2325,6 +2597,10 @@ draw_node_children = function(i, node, seen, active)
 
     for j, child_id in ipairs(node_descriptor.children) do
         local child, node_dim_requirements, child_active = draw_node(child_id, seen)
+        if child == nil then
+            -- can happened when duplicate/edit/erase nodes
+            break
+        end
         -- Y needs to be dynamic
         local child_render_pos = {
             x = node_pos.x + node_dims.x + 20,
@@ -2383,11 +2659,26 @@ draw_node_children = function(i, node, seen, active)
     return out_dim_requirements, active
 end
 
-local function child_lookup(children_map_array, target_node)
-    
+local function child_lookup_should_draw(children_map_array, target_node)
+    for i = #children_map_array, 1, -1 do
+        if children_map_array[i][target_node] ~= nil and not children_map_array[i][target_node].drawn then
+            children_map_array[i][target_node].drawn = true
+            return true
+        end
+    end
+    return false
 end
 
-draw_node_children_by_transition = function(i, node, seen, active, root_node_child_map)
+local function child_lookup_exists(children_map_array, target_node)
+    for i = #children_map_array, 1, -1 do
+        if children_map_array[i][target_node] ~= nil then
+            return true
+        end
+    end
+    return false
+end
+
+draw_node_children_by_transition = function(i, node, seen, active, node_children_map_array)
     seen = seen or {}
     if seen[node] then return end
 
@@ -2402,36 +2693,37 @@ draw_node_children_by_transition = function(i, node, seen, active, root_node_chi
 
     local out_dim_requirements = { x=0, y=0 }
 
-    if root_node_child_map == nil then
-        root_node_child_map = {}
-        if node_descriptor.children == nil or #node_descriptor.children == 0 then
-            local current_node = active_tree:get_node(i)
-            local parent_node = current_node:get_parent()
-            if parent_node ~= nil then
-                local parent_index = get_cached_node_index_by_id(active_tree, parent_node)
-
-                local parent_descriptor = custom_tree[tonumber(parent_index)]
-                for _, child_id in ipairs(parent_descriptor.children) do
-                    root_node_child_map[child_id] = { drawn = false }
-                end
-            end
-        else
+    if node_children_map_array == nil then
+        local root_node_child_map = {}
+        if node_descriptor.children ~= nil and #node_descriptor.children > 0 then
             for _, child_id in ipairs(node_descriptor.children) do
                 root_node_child_map[child_id] = { drawn = false }
             end
         end
+        node_children_map_array = {}
+        -- node_children_map_array[0] = root_node_child_map
+        table.insert(node_children_map_array, root_node_child_map) -- push current children
+    else
+        local current_node_child_map = {}
+        for _, child_id in ipairs(node_descriptor.children) do
+            current_node_child_map[child_id] = { drawn = false }
+        end
+        table.insert(node_children_map_array, current_node_child_map) -- push current children
+        -- node_children_map_array[#node_children_map_array] = current_node_child_map
     end
 
-    local current_node_child_map = {}
-    for _, child_id in ipairs(node_descriptor.children) do
-        current_node_child_map[child_id] = { drawn = false }
-    end
+    -- for j, v in ipairs(node_children_map_array) do
+    --     imgui.text(tostring(j) .. ": ")
+    --     for child_id in pairs(v) do
+    --         imgui.text("    " .. tostring(child_id))
+    --     end
+    -- end
 
     local function draw_child_node(child_id, dangling, style_type)
         -- generally same as above
 
 
-        local child, node_dim_requirements, child_active = draw_node(child_id, seen, root_node_child_map, dangling, style_type)
+        local child, node_dim_requirements, child_active = draw_node(child_id, seen, node_children_map_array, dangling, style_type)
         -- Y needs to be dynamic
         local child_render_pos = {
             x = node_pos.x + node_dims.x + 50,
@@ -2476,6 +2768,9 @@ draw_node_children_by_transition = function(i, node, seen, active, root_node_chi
     end
 
     local function draw_link_to(child_id, style_type)
+        -- if we draw all links, some node haven't been drawn when it's referenced, so check it here
+        if node_map[i] == nil or node_map[child_id] == nil then return end
+
         -- We shouldn't use node name as link id, some nodes have the same name
         -- for example, sacred sheath, 4213 and 4229, both are "atk.atk_161_MR.atk_316"
         local link_id = imgui.get_id(i .. " to " .. child_id .. " LINK")
@@ -2495,61 +2790,27 @@ draw_node_children_by_transition = function(i, node, seen, active, root_node_chi
     end
 
     local drawn_count = 0
-    -- sdk.get_managed_singleton("snow.gui.ChatManager"):call("reqAddChatInfomation", "Drawing node " .. tostring(i), 2289944406)
     for j, start_state_id in ipairs(node_descriptor.start_states) do
-        if root_node_child_map[start_state_id] or current_node_child_map[start_state_id] then
-            if root_node_child_map[start_state_id] and not root_node_child_map[start_state_id].drawn then
-                -- is child, draw
-                root_node_child_map[start_state_id].drawn = true
-
-                draw_child_node(start_state_id, nil, "StartState")
-
-                drawn_count = drawn_count + 1
-            elseif current_node_child_map[start_state_id] and not current_node_child_map[start_state_id].drawn then
-                current_node_child_map[start_state_id].drawn = true
-
-                draw_child_node(start_state_id, nil, "StartState")
-
-                drawn_count = drawn_count + 1
-            end
+        if child_lookup_should_draw(node_children_map_array, start_state_id) then
+            draw_child_node(start_state_id, nil, "StartState")
             draw_link_to(start_state_id, "StartState")
-            -- imnodes.push_color_style(7, 0xFF454580)
-            -- -- the exit state drawn in other nodes. Link it
-            -- local link_id = imgui.get_id(i .. " to " .. start_state_id .. " LINK")
-            -- -- local link_id = imgui.get_id(node_descriptor.name .. custom_tree[start_state_id].name .. "LINK")
-            -- if node_is_hovered and node_hovered_id == node.id then
-            --     draw_link(true, link_id, node_map[i].outputs[1], node_map[start_state_id].inputs[1])
-            -- else
-            --     draw_link(false, link_id, node_map[i].outputs[1], node_map[start_state_id].inputs[1])
-            -- end
-            -- imnodes.pop_color_style()
+
+            drawn_count = drawn_count + 1
+        elseif cfg.display_all_states_link then
+            draw_link_to(start_state_id, "StartState")
         end
     end
 
     for j, state_id in ipairs(node_descriptor.states) do
-        if root_node_child_map[state_id] or current_node_child_map[state_id] then
-            if root_node_child_map[state_id] and not root_node_child_map[state_id].drawn then
-                -- is child, draw
-                root_node_child_map[state_id].drawn = true
-
-                draw_child_node(state_id)
-                drawn_count = drawn_count + 1
-            elseif current_node_child_map[state_id] and not current_node_child_map[state_id].drawn then
-                current_node_child_map[state_id].drawn = true
-
-                draw_child_node(state_id)
-                drawn_count = drawn_count + 1
-            end
+        if child_lookup_should_draw(node_children_map_array, state_id) then
+            draw_child_node(state_id)
             draw_link_to(state_id)
-            -- the exit state drawn in other nodes. Link it
-            -- We shouldn't use node name as link id, some nodes have the same name
-            -- for example, sacred sheath, 4213 and 4229, both are "atk.atk_161_MR.atk_316"
-            -- local link_id = imgui.get_id(i .. " to " .. state_id .. " LINK")
-            -- if node_is_hovered and node_hovered_id == node.id  then
-            --     draw_link(true, link_id, node_map[i].outputs[1], node_map[state_id].inputs[1])
-            -- else
-            --     draw_link(false, link_id, node_map[i].outputs[1], node_map[state_id].inputs[1])
-            -- end
+
+            drawn_count = drawn_count + 1
+        elseif cfg.display_all_states_link and child_lookup_exists(node_children_map_array, state_id) then
+            -- this function doesn't clear the nodemap cache,
+            -- causes many position cached exists even if the node isn't drawn
+            draw_link_to(state_id)
         end
     end
 
@@ -2557,26 +2818,15 @@ draw_node_children_by_transition = function(i, node, seen, active, root_node_chi
         -- two cases here
         -- 1. the child belongs to the root node and the node is referencing it, we shouldn't draw it multiple times
         -- 2. the child belongs to one child of root node, in the first time (== nil) we should draw it
-        local drawn = (current_node_child_map[child_id] ~= nil and current_node_child_map[child_id].drawn)
-        drawn = drawn or (root_node_child_map[child_id] ~= nil and root_node_child_map[child_id].drawn)
-        if not drawn then
-            -- we don't care about the current node children drawn or not anymore
-            if root_node_child_map[child_id] ~= nil then
-                root_node_child_map[child_id].drawn = true
-            end
-
+        if child_lookup_should_draw(node_children_map_array, child_id) then
             draw_child_node(child_id, true)
-            drawn_count = drawn_count + 1
-
-            -- local link_id = imgui.get_id(i .. " to " .. child_id .. " LINK")
-            -- if node_is_hovered and node_hovered_id == node.id  then
-            --     draw_link(true, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
-            -- else
-            --     draw_link(false, link_id, node_map[i].outputs[1], node_map[child_id].inputs[1])
-            -- end
             draw_link_to(child_id, "Dangling")
+
+            drawn_count = drawn_count + 1
         end
     end
+    -- pop current children
+    table.remove(node_children_map_array)
 
     -- Only add the node dimensions to the out dim requirements
     -- if the node has no children, meaning it's the end of the chain
@@ -2594,30 +2844,88 @@ draw_node_children_by_transition = function(i, node, seen, active, root_node_chi
     return out_dim_requirements, active
 end
 
-local function node_can_exit_from_root(i, valid_node_map)
-    -- this function cannot detect such case:
-    -- 1. Root children ABC
-    -- 2. A children DEF
-    -- 3. C ref to DEF
-
-    local current_node_child_map = {}
-    for _, child_id in ipairs(custom_tree[i].children) do
-        current_node_child_map[child_id] = { drawn = false }
-    end
-    for _, id in ipairs(custom_tree[i].start_states) do
-        if current_node_child_map[id] == nil and valid_node_map[id] == nil then
-            return true
-        end
-    end
-    for _, id in ipairs(custom_tree[i].states) do
-        if current_node_child_map[id] == nil and valid_node_map[id] == nil then
+local function children_map_array_has_child(children_map_array, child_id)
+    if children_map_array == nil then return false end
+    for i = #children_map_array, 1, -1 do
+        if children_map_array[i][child_id] ~= nil then
             return true
         end
     end
     return false
 end
 
+local function node_can_exit_from_root(target_node, children_map_array)
+    local all_child_map = {}
+    local search_nodes = {}
+    local node = active_tree:get_node(target_node)
+    if children_map_array ~= nil and target_node ~= 0 then
+        -- only find from parent when it's not root
+        local parent_index = get_cached_node_index(active_tree, active_tree:get_node_by_id(node:get_parent():get_id()))
+        table.insert(search_nodes, parent_index)
+    else
+        table.insert(search_nodes, target_node)
+    end
+    while #search_nodes > 0 do
+        local current_search_node_id = search_nodes[1]
+
+        local children = custom_tree[current_search_node_id].children
+        if children ~= nil then
+            for _, child_id in ipairs(children) do
+                if all_child_map[child_id] == nil then
+                   table.insert(search_nodes, child_id)
+                end
+                all_child_map[child_id] = {}
+            end
+        end
+
+        if #search_nodes > 50 then
+            -- above due to performance issue
+            return false
+        end
+
+        table.remove(search_nodes, 1)
+    end
+    for _, id in ipairs(custom_tree[target_node].start_states) do
+        if all_child_map[id] == nil then
+            return true
+        end
+    end
+    for _, id in ipairs(custom_tree[target_node].states) do
+        if all_child_map[id] == nil then
+            return true
+        end
+    end
+
+    -- this function doesn't track children recursively, so this case doesn't work
+    -- 1. Root children ABC
+    -- 2. A children DEF
+    -- 3. C ref to DEF
+    -- local current_node_child_map = {}
+    -- for _, child_id in ipairs(custom_tree[target_node].children) do
+    --     current_node_child_map[child_id] = { drawn = false }
+    -- end
+
+    -- for _, id in ipairs(custom_tree[target_node].start_states) do
+    --     if current_node_child_map[id] == nil and not children_map_array_has_child(children_map_array, id) then
+    --         return true
+    --     end
+    -- end
+    -- for _, id in ipairs(custom_tree[target_node].states) do
+    --     if current_node_child_map[id] == nil and not children_map_array_has_child(children_map_array, id) then
+    --         return true
+    --     end
+    -- end
+
+    return false
+end
+
 draw_node = function(i, seen, valid_node_map, is_dangling, style_type)
+    if i == 0 then
+        -- refuse to render. Too many children.
+        send_message("refuse to render root node due to performance")
+        return
+    end
+
     seen = seen or {}
     if seen[i] then return end
     if not custom_tree[i] then return end
@@ -2627,6 +2935,7 @@ draw_node = function(i, seen, valid_node_map, is_dangling, style_type)
     if active_tree ~= nil then
         local node = active_tree:get_node(i)
         if node == nil then
+            imgui.text("Failed to draw child [" .. tostring(i) .. "] ")
             return
         end
 
@@ -2638,19 +2947,22 @@ draw_node = function(i, seen, valid_node_map, is_dangling, style_type)
     if is_dangling then node_name = "[dangling child] " .. node_name end
 
     if valid_node_map ~= nil then
+        -- predicate if the node is exit node
         local is_exit_state = node_can_exit_from_root(i, valid_node_map)
         if is_exit_state then
-            node_name = "[Exit] " .. node_name
+            if is_dangling then
+                node_name = "[Exit] " .. node_name
+            end
             style_type = "Exit"
         end
     end
-    -- predicate if the node is exit node
 
     if is_dangling then
         imnodes.push_color_style(4, 0xFFAA0075)
         imnodes.push_color_style(5, 0xFFCC0089)
         imnodes.push_color_style(6, 0xFFEE009F)
     elseif style_type == "StartState" then
+        -- 4 is ImNodesCol_TitleBar, see https://github.com/Nelarius/imnodes/blob/master/imnodes.h
         imnodes.push_color_style(4, 0xFF454580) -- normal title bar color
         imnodes.push_color_style(5, 0xFF4545C0) -- hover color
         imnodes.push_color_style(6, 0xFF4545EE) -- selected color
@@ -2664,7 +2976,10 @@ draw_node = function(i, seen, valid_node_map, is_dangling, style_type)
         node_name,
         custom_id,
         function()
-            if not node_map[i] then return end
+            if not node_map[i] then
+                imgui.text("Failed to draw child [" .. tostring(i) .. "] ")
+                return
+            end
 
             if active_tree then
                 --imgui.text(tostring(active_tree:get_node(i)))
@@ -2675,6 +2990,10 @@ draw_node = function(i, seen, valid_node_map, is_dangling, style_type)
             end
         end
     )
+
+    -- NOTE: Note: If the code aborts (due to error) before the color style pop,
+    -- the color system will be polluted forever.
+    -- The workaround is to pop up the color style until an out-of-bounds error occurs.
     if is_dangling or style_type ~= nil then
         imnodes.pop_color_style()
         imnodes.pop_color_style()
@@ -3599,7 +3918,8 @@ local function draw_stupid_editor(name)
             changed, cfg.show_side_panels = imgui.checkbox("Show side panel", cfg.show_side_panels)
             changed, cfg.use_dynamic_side_panels = imgui.checkbox("Use dynamic side panel", cfg.use_dynamic_side_panels)
             changed, unlock_node_positioning = imgui.checkbox("Unlock Node Positioning", unlock_node_positioning)
-            changed, cfg.use_transition_positioning = imgui.checkbox("Use Transition Positioning", cfg.use_transition_positioning)
+            changed, cfg.use_transition_positioning = imgui.checkbox("Transition Tree Mode", cfg.use_transition_positioning)
+            changed, cfg.display_all_states_link = imgui.checkbox("[Transition Tree Mode] Display All States Link", cfg.display_all_states_link)
             changed, cfg.show_minimap = imgui.checkbox("Show Minimap", cfg.show_minimap)
 
             changed, cfg.follow_active_nodes = imgui.checkbox("Follow Active Nodes", cfg.follow_active_nodes)
@@ -3908,7 +4228,8 @@ local function draw_stupid_editor(name)
             if changed or imgui.button("Run") then
                 local node = tree:get_node(tonumber(quick_run))
 
-                layer:call("setCurrentNode(System.UInt64, via.behaviortree.SetNodeInfo, via.motion.SetMotionTransitionInfo)", node:get_id(), nil, nil)
+                local id_to_run = node:get_id()
+                layer:call("setCurrentNode(System.UInt64, via.behaviortree.SetNodeInfo, via.motion.SetMotionTransitionInfo)", id_to_run, nil, nil)
                 --queued_editor_id_move = {["i"] = quick_run, ["id"] = node:get_id()}
             end
         end
@@ -3934,7 +4255,7 @@ local function draw_stupid_editor(name)
         for i=0, tree:get_node_count()-1 do
             local node = tree:get_node(i)
 
-            if node then
+            if node and node:get_data() ~= nil then
                 local insertion = {
                     name = node:get_full_name(),
                     children = {},
@@ -3979,7 +4300,7 @@ local function draw_stupid_editor(name)
 
         local made_child = false
 
-        if cfg.use_dynamic_side_panels or was_hovering_sidebar then
+        if not cfg.use_dynamic_side_panels or was_hovering_sidebar then
             made_child = imgui.begin_child_window("SidePanel",  Vector2f.new(math.max(ws.x / 3.5, SIDEBAR_BASE_WIDTH), 0), true, 1 << 6)
         else
             made_child = imgui.begin_child_window("SidePanel",  Vector2f.new(math.min(ws.x / 8, SIDEBAR_BASE_WIDTH), 0), true, 1 << 6)
@@ -4045,6 +4366,7 @@ local function draw_stupid_editor(name)
                     cfg.default_node = queued_editor_id_move.i
                 end]]
 
+                node_map = {} -- Clear cache
                 set_base_node_to_parent(tree, queued_editor_id_move.i)
                 queued_editor_id_move_step2 = queued_editor_id_move.id
                 queued_editor_id_start_time = os.clock()
@@ -4085,6 +4407,7 @@ local function draw_stupid_editor(name)
     end
 
     -- draw_node draws all children, so only draw the root node
+    current_link_count = 0
     if cfg.default_node == 0 then
         if custom_tree[0] then
             if node_map[0] and not unlock_node_positioning then
@@ -4158,10 +4481,18 @@ re.on_frame(function()
     imgui.set_next_window_size({EDITOR_SIZE.x, EDITOR_SIZE.y}, 1 << 1) -- ImGuiCond_Once
     imgui.set_next_window_pos({disp_size.x / 2 - (EDITOR_SIZE.x / 2), disp_size.y / 2 - (EDITOR_SIZE.y / 2)}, 1 << 1)
     imgui.push_font(font)
-    draw_stupid_editor("Behavior Tree Editor v0.1337")
+    draw_stupid_editor("Behavior Tree Editor v0.1339")
     imgui.pop_font()
 
     last_time = os.clock()
 
     imgui.pop_style_var()
 end)
+
+-- TODO:
+-- Refresh nodes, links (and node_map cache) after edit
+-- Global Index indicator for Actions and Conditions
+-- fix Active Link
+-- Start State Transition edit
+-- Replace Condition ID only works for state condtion
+-- Add Node/Condition don't fold tree_node
