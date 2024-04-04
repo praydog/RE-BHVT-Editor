@@ -517,6 +517,14 @@ local function get_localplayer()
         if props_manager == nil then return nil end
 
         return props_manager:get_Player()
+    elseif gn == "dd2" then
+        local character_manager = sdk.get_managed_singleton("app.CharacterManager")
+        if character_manager == nil then return nil end
+
+        local player = character_manager:get_ManualPlayer()
+        if player == nil then return nil end
+
+        return player:get_GameObject()
     end
 
     return nil
