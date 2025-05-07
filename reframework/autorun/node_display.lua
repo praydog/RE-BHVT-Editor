@@ -7,35 +7,43 @@ local HookManager = require("bhvteditor/HookManager")
 local ActionHook = require("bhvteditor/ActionHook")
 local ConditionHook = require("bhvteditor/ConditionHook")
 
-local ImGuiStyleVar =
-{
-    --Enum name --------------------- --Member in ImGuiStyle structure (see ImGuiStyle for descriptions)
-    ImGuiStyleVar_Alpha=0,               --float     Alpha
-    ImGuiStyleVar_WindowPadding=1,       --ImVec2    WindowPadding
-    ImGuiStyleVar_WindowRounding=2,      --float     WindowRounding
-    ImGuiStyleVar_WindowBorderSize=3,    --float     WindowBorderSize
-    ImGuiStyleVar_WindowMinSize=4,       --ImVec2    WindowMinSize
-    ImGuiStyleVar_WindowTitleAlign=5,    --ImVec2    WindowTitleAlign
-    ImGuiStyleVar_ChildRounding=6,       --float     ChildRounding
-    ImGuiStyleVar_ChildBorderSize=7,     --float     ChildBorderSize
-    ImGuiStyleVar_PopupRounding=8,       --float     PopupRounding
-    ImGuiStyleVar_PopupBorderSize=9,     --float     PopupBorderSize
-    ImGuiStyleVar_FramePadding=10,        --ImVec2    FramePadding
-    ImGuiStyleVar_FrameRounding=11,       --float     FrameRounding
-    ImGuiStyleVar_FrameBorderSize=12,     --float     FrameBorderSize
-    ImGuiStyleVar_ItemSpacing=13,         --ImVec2    ItemSpacing
-    ImGuiStyleVar_ItemInnerSpacing=14,    --ImVec2    ItemInnerSpacing
-    ImGuiStyleVar_IndentSpacing=15,       --float     IndentSpacing
-    ImGuiStyleVar_CellPadding=16,         --ImVec2    CellPadding
-    ImGuiStyleVar_ScrollbarSize=17,       --float     ScrollbarSize
-    ImGuiStyleVar_ScrollbarRounding=18,   --float     ScrollbarRounding
-    ImGuiStyleVar_GrabMinSize=19,         --float     GrabMinSize
-    ImGuiStyleVar_GrabRounding=20,        --float     GrabRounding
-    ImGuiStyleVar_TabRounding=21,         --float     TabRounding
-    ImGuiStyleVar_ButtonTextAlign=22,     --ImVec2    ButtonTextAlign
-    ImGuiStyleVar_SelectableTextAlign=23, --ImVec2    SelectableTextAlign
-    ImGuiStyleVar_COUNT=24
-};
+local ImGuiStyleVar = {
+    ImGuiStyleVar_Alpha = 0,             
+    ImGuiStyleVar_DisabledAlpha = 1,            
+    ImGuiStyleVar_WindowPadding = 2,            
+    ImGuiStyleVar_WindowRounding = 3,           
+    ImGuiStyleVar_WindowBorderSize = 4,        
+    ImGuiStyleVar_WindowMinSize = 5,            
+    ImGuiStyleVar_WindowTitleAlign = 6,         
+    ImGuiStyleVar_ChildRounding = 7,            
+    ImGuiStyleVar_ChildBorderSize = 8,          
+    ImGuiStyleVar_PopupRounding = 9,            
+    ImGuiStyleVar_PopupBorderSize = 10,          
+    ImGuiStyleVar_FramePadding = 11,             
+    ImGuiStyleVar_FrameRounding = 12, 
+    ImGuiStyleVar_FrameBorderSize = 13,        
+    ImGuiStyleVar_ItemSpacing = 14,     
+    ImGuiStyleVar_ItemInnerSpacing = 15,         
+    ImGuiStyleVar_IndentSpacing = 16,    
+    ImGuiStyleVar_CellPadding = 17,       
+    ImGuiStyleVar_ScrollbarSize = 18,         
+    ImGuiStyleVar_ScrollbarRounding = 19,       
+    ImGuiStyleVar_GrabMinSize = 20,   
+    ImGuiStyleVar_GrabRounding = 21,         
+    ImGuiStyleVar_ImageBorderSize = 22,        
+    ImGuiStyleVar_TabRounding = 23,     
+    ImGuiStyleVar_TabBorderSize = 24,         
+    ImGuiStyleVar_TabBarBorderSize = 25,       
+    ImGuiStyleVar_TabBarOverlineSize = 26,    
+    ImGuiStyleVar_TableAngledHeadersAngle = 27,  
+    ImGuiStyleVar_TableAngledHeadersTextAlign = 28,
+    ImGuiStyleVar_ButtonTextAlign = 29,
+    ImGuiStyleVar_SelectableTextAlign = 30,      
+    ImGuiStyleVar_SeparatorTextBorderSize = 31,
+    ImGuiStyleVar_SeparatorTextAlign = 32,
+    ImGuiStyleVar_SeparatorTextPadding = 33,     
+    ImGuiStyleVar_COUNT = 34
+}
 
 local basic_node_arrays = {
     "children",
